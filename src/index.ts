@@ -1,7 +1,7 @@
 import { createAuth, type AuthEnv } from './auth';
 import { parseEmail } from './email';
 import { handleMcp } from './mcp';
-import { readHistory, sendRecordedEmail } from './history';
+import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
 import { isValidKey, manageKeys, type KeyEnv } from './keys';
 
 interface Env extends AuthEnv, KeyEnv { API_KEY: string; ASSETS: Fetcher }
@@ -37,9 +37,14 @@ export default {
     try { data = await request.json(); } catch { return Response.json({ message: 'Invalid JSON' }, { status: 400 }); }
     const email = parseEmail(data);
     if (typeof email === 'string') return Response.json({ message: email }, { status: 400 });
+    const idempotencyKey = request.headers.get('Idempotency-Key');
+    if (idempotencyKey !== null && (idempotencyKey.length < 1 || idempotencyKey.length > 256)) return Response.json({ message: 'Idempotency-Key must be 1-256 characters', name: 'invalid_idempotency_key' }, { status: 400 });
     try {
-      const result = await sendRecordedEmail(env, email);
+      const result = await sendRecordedEmail(env, email, idempotencyKey ?? undefined);
       return Response.json(result);
-    } catch { return Response.json({ message: 'Email could not be confirmed. Check history before retrying; delivery may be uncertain.' }, { status: 502 }); }
+    } catch (error) {
+      if (error instanceof IdempotencyConflict) return Response.json({ message: error.code, name: error.code }, { status: 409 });
+      return Response.json({ message: 'Email could not be confirmed. Check history before retrying; delivery may be uncertain.' }, { status: 502 });
+    }
   }
 };

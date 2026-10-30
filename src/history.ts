@@ -1,11 +1,32 @@
 import type { AuthEnv } from './auth';
 import type { OutboundEmail } from './email';
 
-export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail): Promise<{ id: string }> {
+export class IdempotencyConflict extends Error {
+  constructor(public code: string) { super(code); }
+}
+
+async function digest(value: string): Promise<string> {
+  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idempotencyKey?: string): Promise<{ id: string }> {
   const id = crypto.randomUUID();
   const to = Array.isArray(email.to) ? email.to : [email.to];
-  await env.DB.prepare('INSERT INTO email_history (id, sender, recipients, subject, status, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .bind(id, email.from, JSON.stringify(to), email.subject, 'pending', new Date().toISOString()).run();
+  const keyHash = idempotencyKey ? await digest(idempotencyKey) : null;
+  const requestHash = keyHash ? await digest(JSON.stringify(email)) : null;
+  if (keyHash) {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    await env.DB.prepare('UPDATE email_history SET idempotency_key_hash = NULL WHERE idempotency_key_hash = ? AND created_at < ?').bind(keyHash, cutoff).run();
+  }
+  const insert = await env.DB.prepare('INSERT INTO email_history (id, sender, recipients, subject, status, created_at, idempotency_key_hash, request_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(idempotency_key_hash) DO NOTHING')
+    .bind(id, email.from, JSON.stringify(to), email.subject, 'pending', new Date().toISOString(), keyHash, requestHash).run();
+  if (!insert.meta.changes) {
+    const existing = await env.DB.prepare('SELECT id, request_hash, status FROM email_history WHERE idempotency_key_hash = ?').bind(keyHash).first<{ id: string; request_hash: string; status: string }>();
+    if (!existing || existing.request_hash !== requestHash) throw new IdempotencyConflict('invalid_idempotent_request');
+    if (existing.status !== 'accepted') throw new IdempotencyConflict('concurrent_or_uncertain_idempotent_request');
+    return { id: existing.id };
+  }
   let result: { messageId: string };
   try {
     result = await env.EMAIL.send(email);

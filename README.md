@@ -6,7 +6,7 @@ An early-stage, self-hosted transactional email service on Cloudflare Workers. T
 
 ## Current capabilities
 
-- `POST /emails` accepts `from`, `to`, `subject`, and `text` or `html` with a bearer API key.
+- `POST /emails` accepts `from`, `to`, `subject`, and `text` or `html` with a bearer API key. An optional `Idempotency-Key` prevents duplicate sends for 24 hours. Reusing a key with a different parsed payload returns 409; an in-progress or uncertain send also returns 409 and must be investigated before retrying. The MCP tool does not yet expose idempotency keys.
 - Supports one or more `to`, `cc`, and `bcc` recipients (up to 50 total), a single `reply_to` address, custom `headers`, and base64 attachments with optional `content_type` and inline `content_id`. Remote attachment URLs are not supported. Unsupported fields are rejected. Other Resend API features are not implemented.
 - `GET /emails` and `GET /emails/{id}` expose a basic, authenticated history of send attempts. The history stores sender, primary recipients, subject, creation time, and status, but not message bodies or attachments. `accepted` means accepted by Cloudflare, not delivered. A `pending` or `unknown` status requires investigation before retrying. Listing supports `limit` (1-100), but does not yet support pagination.
 - A stateless MCP endpoint at `/mcp` exposes the `send_email` tool over Streamable HTTP, using the same bearer API key as `/emails`.
