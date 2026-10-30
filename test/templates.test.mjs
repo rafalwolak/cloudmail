@@ -105,3 +105,33 @@ test('published aliases resolve safely and change only after publication', async
     assert.equal((await call(`/templates/${ids[1]}/publish`, 'POST')).status, 200);
   } finally { for (const id of ids) await call(`/templates/${id}`, 'DELETE'); }
 });
+
+test('filters template names and publication state with stable cursors', async () => {
+  const marker = `Filter-${crypto.randomUUID()}`;
+  const ids = [];
+  try {
+    for (let i = 0; i < 3; i++) {
+      const created = await call('/templates', 'POST', { name: `${marker} ${i}`, html: '<p>Hi</p>' });
+      assert.equal(created.status, 200); ids.push((await created.json()).id);
+    }
+    assert.equal((await call(`/templates/${ids[1]}/publish`, 'POST')).status, 200);
+    const query = `name=${encodeURIComponent(marker.toLowerCase())}&status=draft&limit=1`;
+    const first = await (await call(`/templates?${query}`, 'GET')).json();
+    assert.equal(first.data.length, 1); assert.equal(first.has_more, true);
+    const second = await (await call(`/templates?${query}&after=${first.data[0].id}`, 'GET')).json();
+    assert.deepEqual(new Set([first.data[0].id, second.data[0].id]), new Set([ids[0], ids[2]]));
+    const published = await (await call(`/templates?name=${encodeURIComponent(marker)}&status=published`, 'GET')).json();
+    assert.deepEqual(published.data.map(item => item.id), [ids[1]]);
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+    const client = new Client({ name: 'template-filter-test', version: '1.0.0' });
+    try {
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers } }));
+      const result = await client.callTool({ name: 'list_templates', arguments: { name: marker, status: 'published' } });
+      assert.deepEqual(JSON.parse(result.content[0].text).data.map(item => item.id), [ids[1]]);
+    } finally { await client.close(); }
+
+    assert.equal((await call('/templates?status=unknown', 'GET')).status, 400);
+    assert.equal((await call('/templates?name=', 'GET')).status, 400);
+  } finally { for (const id of ids) await call(`/templates/${id}`, 'DELETE'); }
+});

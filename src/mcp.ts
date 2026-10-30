@@ -235,12 +235,14 @@ export async function handleMcp(request: Request, env: KeyEnv & InboundEnv & { C
   const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
   const mutating = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
   server.registerTool('list_templates', {
-    description: 'List template drafts using optional before or after cursors.', inputSchema: z.object({ limit: z.number().int().min(1).max(100).optional(), before: z.string().optional(), after: z.string().optional() }).strict(), annotations: readOnly,
+    description: 'List template drafts using optional before or after cursors.', inputSchema: z.object({ limit: z.number().int().min(1).max(100).optional(), before: z.string().optional(), after: z.string().optional(), name: z.string().min(1).max(100).optional(), status: z.enum(['draft', 'published']).optional() }).strict(), annotations: readOnly,
   }, async args => {
     const params = new URLSearchParams();
     if (args.limit !== undefined) params.set('limit', String(args.limit));
     if (args.before !== undefined) params.set('before', args.before);
     if (args.after !== undefined) params.set('after', args.after);
+    if (args.name !== undefined) params.set('name', args.name);
+    if (args.status !== undefined) params.set('status', args.status);
     return templateTool(`/templates?${params}`, 'GET');
   });
   server.registerTool('get_template', {

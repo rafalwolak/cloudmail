@@ -45,7 +45,7 @@ function setSignedIn(session) {
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) { $('#account').textContent = `Signed in as ${session.user.email}`; if (cloudflareConnected) $('#cloudflare-status').textContent = 'Cloudflare connected. Choose zones to manage sending domains.'; }
-  else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); $('#compose-status').textContent = ''; composeKey = null; composeDirty = false; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
+  else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); $('#compose-status').textContent = ''; composeKey = null; composeDirty = false; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; templateGeneration++; templateFilters = {}; $('#template-filter').reset(); $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
   if (!session) { inboxGeneration++; inboxFilters = {}; $('#inbox-filter').reset(); historyGeneration++; historyFilters = {}; $('#history-filter').reset(); }
 }
 let cloudflarePage = 1;
@@ -656,6 +656,8 @@ $('#inbox-more').addEventListener('click', async () => {
 let templateId = null;
 let templateDirty = false;
 let templateCursor = null;
+let templateFilters = {};
+let templateGeneration = 0;
 const templateForm = $('#template-form');
 const templateStatus = $('#template-status');
 function confirmDiscard() { return !templateDirty || window.confirm('Discard unsaved template changes?'); }
@@ -679,11 +681,14 @@ function openTemplate(template = null) {
   updatePublishButton(); templateForm.hidden = false; $('#template-name').focus();
 }
 async function loadTemplates(append = false) {
-  const params = new URLSearchParams({ limit: '20' });
+  const generation = ++templateGeneration;
+  const params = new URLSearchParams({ limit: '20', ...templateFilters });
   if (append && templateCursor) params.set('after', templateCursor);
   const result = await api(`/api/templates?${params}`);
+  if (generation !== templateGeneration) return;
   const list = $('#template-list'); if (!append) list.replaceChildren();
   $('#empty-templates').hidden = list.children.length > 0 || result.data.length > 0;
+  $('#empty-templates').textContent = Object.keys(templateFilters).length ? 'No templates match these filters.' : 'No templates yet.';
   templateCursor = result.data.at(-1)?.id || null;
   $('#more-templates').hidden = !result.has_more;
   for (const template of result.data) {
@@ -708,6 +713,15 @@ async function loadTemplates(append = false) {
     item.append(name, actions); list.append(item);
   }
 }
+$('#template-filter').addEventListener('submit', async event => {
+  event.preventDefault();
+  templateFilters = Object.fromEntries([...new FormData(event.currentTarget)].map(([key, value]) => [key, value.trim()]).filter(([, value]) => value));
+  try { await loadTemplates(); } catch (error) { templateStatus.textContent = error.message; }
+});
+$('#template-clear').addEventListener('click', async () => {
+  $('#template-filter').reset(); templateFilters = {};
+  try { await loadTemplates(); } catch (error) { templateStatus.textContent = error.message; }
+});
 $('#more-templates').addEventListener('click', async () => {
   const button = $('#more-templates'); button.disabled = true;
   try { await loadTemplates(true); } catch (error) { templateStatus.textContent = error.message; }

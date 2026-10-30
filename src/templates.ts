@@ -38,20 +38,31 @@ export async function handleTemplates(request: Request, env: AuthEnv): Promise<R
   const reference = match?.[1];
   if (path === '/templates' && request.method === 'GET') {
     const params = url.searchParams;
-    if ([...params.keys()].some(key => !['limit', 'before', 'after'].includes(key)) || ['limit', 'before', 'after'].some(key => params.getAll(key).length > 1)) return json({ message: 'Unsupported or duplicate query parameter' }, 400);
+    const allowed = ['limit', 'before', 'after', 'name', 'status'];
+    if ([...params.keys()].some(key => !allowed.includes(key)) || allowed.some(key => params.getAll(key).length > 1)) return json({ message: 'Unsupported or duplicate query parameter' }, 400);
     const raw = params.get('limit') ?? '20';
     if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) return json({ message: 'limit must be between 1 and 100' }, 400);
     const before = params.get('before'); const after = params.get('after');
     if ((before !== null && after !== null) || before === '' || after === '') return json({ message: 'Provide only one valid cursor' }, 400);
     const cursor = before ?? after;
-    let condition = ''; let values: (string | number)[] = [];
+    const conditions: string[] = []; const values: (string | number)[] = [];
+    const name = params.get('name'); const status = params.get('status');
+    if (name !== null) {
+      if (!name.trim() || name.length > 100) return json({ message: 'Invalid name filter' }, 400);
+      conditions.push("instr(lower(json_extract(draft, '$.name')), lower(?)) > 0"); values.push(name.trim());
+    }
+    if (status !== null) {
+      if (!['draft', 'published'].includes(status)) return json({ message: 'Invalid status filter' }, 400);
+      conditions.push(status === 'published' ? 'published IS NOT NULL' : 'published IS NULL');
+    }
     if (cursor !== null) {
       const anchor = await env.DB.prepare('SELECT id, created_at FROM templates WHERE id = ?').bind(cursor).first<{ id: string; created_at: string }>();
       if (!anchor) return json({ message: 'Invalid cursor' }, 400);
-      condition = before !== null ? 'WHERE (created_at, id) > (?, ?)' : 'WHERE (created_at, id) < (?, ?)';
-      values = [anchor.created_at, anchor.id];
+      conditions.push(before !== null ? '(created_at, id) > (?, ?)' : '(created_at, id) < (?, ?)');
+      values.push(anchor.created_at, anchor.id);
     }
     const direction = before !== null ? 'ASC' : 'DESC'; const limit = Number(raw);
+    const condition = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const rows = await env.DB.prepare(`SELECT * FROM templates ${condition} ORDER BY created_at ${direction}, id ${direction} LIMIT ?`).bind(...values, limit + 1).all<TemplateRow>();
     const result = rows.results.slice(0, limit);
     if (before !== null) result.reverse();
