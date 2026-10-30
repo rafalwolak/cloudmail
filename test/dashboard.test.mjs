@@ -153,6 +153,9 @@ test('Cloudflare integration endpoints require an administrator session', async 
     ['/api/cloudflare/zones', 'GET'],
     ['/api/cloudflare/zones', 'POST'],
     [`/api/cloudflare/zones/${'a'.repeat(32)}/domains`, 'GET'],
+    [`/api/cloudflare/zones/${'a'.repeat(32)}/suppressions`, 'GET'],
+    [`/api/cloudflare/zones/${'a'.repeat(32)}/suppressions`, 'POST'],
+    [`/api/cloudflare/zones/${'a'.repeat(32)}/suppressions/12345678-1234-4234-8234-123456789abc`, 'DELETE'],
   ]) {
     const response = await fetch(`${base}${path}`, { method, headers: { origin: base, 'content-type': 'application/json' }, ...(method === 'POST' && { body: '{}' }) });
     assert.equal(response.status, 401, `${method} ${path}`);

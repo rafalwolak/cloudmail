@@ -17,13 +17,14 @@ const cloudflareResult = new URLSearchParams(location.search).get('cloudflare');
 const cloudflareConnected = cloudflareResult === 'connected';
 if (resetToken || resetError || ['connected', 'denied'].includes(cloudflareResult)) history.replaceState(null, '', location.pathname);
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => { showView(button.dataset.view); announce(''); }));
+let cloudflareGeneration = 0;
 function setSignedIn(session) {
-  metricsGeneration++;
+  metricsGeneration++; cloudflareGeneration++;
   showView(session ? 'dashboard' : 'login');
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) { $('#account').textContent = `Signed in as ${session.user.email}`; if (cloudflareConnected) $('#cloudflare-status').textContent = 'Cloudflare connected. Choose zones to manage sending domains.'; }
-  else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); $('#compose-status').textContent = ''; composeKey = null; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
+  else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); $('#compose-status').textContent = ''; composeKey = null; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
 }
 let cloudflarePage = 1;
 async function loadCloudflareStatus() {
@@ -74,26 +75,78 @@ $('#cloudflare-zone-form').addEventListener('submit', async event => {
   catch (error) { $('#cloudflare-status').textContent = error.message; } finally { button.disabled = false; }
 });
 async function loadCloudflareDomains() {
-  const zone = $('#cloudflare-selected-zone').value;
+  const zone = $('#cloudflare-selected-zone').value; const generation = cloudflareGeneration;
   const result = await api(`/api/cloudflare/zones/${encodeURIComponent(zone)}/domains`);
+  if (generation !== cloudflareGeneration || zone !== $('#cloudflare-selected-zone').value) return null;
   const list = $('#cloudflare-domain-list'); list.replaceChildren();
   if (!Array.isArray(result.data)) throw new Error('Unexpected Cloudflare domain response.');
   if (!result.data.length) { const item = document.createElement('li'); item.textContent = 'No sending domains configured in this zone.'; list.append(item); }
   for (const domain of result.data) { const item = document.createElement('li'); item.textContent = `${domain.name} · ${domain.enabled ? 'Enabled' : 'Not enabled'} (DNS and delivery not verified)`; list.append(item); }
   return Number(result.result_info?.total_pages) > 1;
 }
-$('#cloudflare-selected-zone').addEventListener('change', () => { $('#cloudflare-domain-list').replaceChildren(); });
+$('#cloudflare-selected-zone').addEventListener('change', () => { cloudflareGeneration++; $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; });
 $('#cloudflare-load-domains').addEventListener('click', async event => {
   event.currentTarget.disabled = true; $('#cloudflare-status').textContent = 'Loading sending domains…';
-  try { const incomplete = await loadCloudflareDomains(); $('#cloudflare-status').textContent = incomplete ? 'Cloudflare returned only the first page. Check Cloudflare for additional domains.' : 'Sending domains loaded.'; } catch (error) { $('#cloudflare-status').textContent = error.message; }
+  try { const incomplete = await loadCloudflareDomains(); if (incomplete === null) return; $('#cloudflare-status').textContent = incomplete ? 'Cloudflare returned only the first page. Check Cloudflare for additional domains.' : 'Sending domains loaded.'; } catch (error) { $('#cloudflare-status').textContent = error.message; }
   finally { event.currentTarget.disabled = false; }
 });
 $('#cloudflare-domain-form').addEventListener('submit', async event => {
   event.preventDefault(); const zone = $('#cloudflare-selected-zone'); const name = $('#cloudflare-domain-name').value.trim();
   if (!window.confirm(`Enable Email Sending for ${name} in ${zone.selectedOptions[0].textContent}? Cloudflare may create sending DNS records shared with other services.`)) return;
-  const button = event.currentTarget.querySelector('button'); button.disabled = true; $('#cloudflare-status').textContent = 'Enabling sending domain…';
-  try { await api(`/api/cloudflare/zones/${encodeURIComponent(zone.value)}/domains`, { method: 'POST', body: JSON.stringify({ name }) }); $('#cloudflare-domain-name').value = ''; const incomplete = await loadCloudflareDomains(); $('#cloudflare-status').textContent = `Cloudflare accepted the configuration. DNS and delivery readiness are not yet verified.${incomplete ? ' The list contains only the first page.' : ''}`; }
-  catch (error) { $('#cloudflare-status').textContent = `${error.message} Check the domain list before retrying.`; }
+  const generation = cloudflareGeneration; const button = event.currentTarget.querySelector('button'); button.disabled = true; $('#cloudflare-status').textContent = 'Enabling sending domain…';
+  try { await api(`/api/cloudflare/zones/${encodeURIComponent(zone.value)}/domains`, { method: 'POST', body: JSON.stringify({ name }) }); if (generation !== cloudflareGeneration) return; $('#cloudflare-domain-name').value = ''; const incomplete = await loadCloudflareDomains(); $('#cloudflare-status').textContent = `Cloudflare accepted the configuration. DNS and delivery readiness are not yet verified.${incomplete ? ' The list contains only the first page.' : ''}`; }
+  catch (error) { if (generation === cloudflareGeneration) $('#cloudflare-status').textContent = `${error.message} Check the domain list before retrying.`; }
+  finally { button.disabled = false; }
+});
+let suppressionCursor = null;
+async function loadCloudflareSuppressions(reset) {
+  const zone = $('#cloudflare-selected-zone').value; const generation = cloudflareGeneration;
+  const params = new URLSearchParams(); if (!reset && suppressionCursor) params.set('cursor', suppressionCursor);
+  const result = await api(`/api/cloudflare/zones/${encodeURIComponent(zone)}/suppressions${params.size ? `?${params}` : ''}`);
+  if (generation !== cloudflareGeneration || zone !== $('#cloudflare-selected-zone').value) return;
+  const list = $('#cloudflare-suppression-list'); if (reset) list.replaceChildren();
+  for (const item of result.data) {
+    const row = document.createElement('li'); const label = document.createElement('span');
+    const scope = item.scope?.type === 'sending_domain' ? `domain: ${item.scope.value}` : item.scope?.type === 'account' ? 'account-wide' : 'scope unknown';
+    label.textContent = `${item.email} · ${item.reason} · ${scope} · ${item.read_only === true ? 'Read only' : item.read_only === false ? 'Editable in Cloudflare' : 'Mutability unknown'}`; row.append(label);
+    if (item.read_only === false && typeof item.id === 'string' && /^[a-f0-9-]{36}$/i.test(item.id)) {
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'text-button'; remove.textContent = 'Remove'; remove.setAttribute('aria-label', `Remove suppression for ${item.email} (${scope})`);
+      remove.addEventListener('click', async () => {
+        if (!window.confirm(`Remove suppression for ${item.email} (${scope})? This permits future delivery attempts. Confirm the recipient should receive email first.`)) return;
+        remove.disabled = true; $('#cloudflare-status').textContent = 'Removing suppression…';
+        try { await api(`/api/cloudflare/zones/${encodeURIComponent(zone)}/suppressions/${encodeURIComponent(item.id)}`, { method: 'DELETE' }); if (generation !== cloudflareGeneration) return; row.remove(); $('#cloudflare-status').textContent = 'Suppression removed. Future delivery attempts are permitted.'; }
+        catch (error) { if (generation === cloudflareGeneration) $('#cloudflare-status').textContent = `${error.message} Check the list before retrying.`; }
+        finally { remove.disabled = false; }
+      }); row.append(remove);
+    }
+    list.append(row);
+  }
+  suppressionCursor = result.next_cursor; $('#cloudflare-more-suppressions').hidden = !suppressionCursor;
+  $('#cloudflare-status').textContent = result.data.length ? 'Suppressions loaded.' : 'No suppressions on this page.';
+}
+for (const [id, reset] of [['#cloudflare-load-suppressions', true], ['#cloudflare-more-suppressions', false]]) $(id).addEventListener('click', async event => {
+  event.currentTarget.disabled = true; $('#cloudflare-status').textContent = 'Loading suppressions…';
+  try { await loadCloudflareSuppressions(reset); } catch (error) { $('#cloudflare-status').textContent = error.message; }
+  finally { event.currentTarget.disabled = false; }
+});
+$('#suppression-scope').addEventListener('change', event => {
+  const domainScope = event.currentTarget.value === 'sending_domain';
+  $('#suppression-domain-wrap').hidden = !domainScope; $('#suppression-domain').required = domainScope;
+});
+$('#cloudflare-suppression-form').addEventListener('submit', async event => {
+  event.preventDefault(); const email = $('#suppression-email').value.trim(); const selected = $('#suppression-scope').value;
+  const scope = selected === 'account' ? { type: 'account' } : { type: 'sending_domain', value: $('#suppression-domain').value.trim().toLowerCase() };
+  const expiry = $('#suppression-expiry').value ? new Date($('#suppression-expiry').value) : null;
+  if (expiry && (!Number.isFinite(expiry.getTime()) || expiry.getTime() <= Date.now())) { $('#cloudflare-status').textContent = 'Choose a future expiration time.'; return; }
+  const scopeDescription = scope.type === 'account' ? 'all sending domains in this account' : scope.value;
+  if (!window.confirm(`Suppress ${email} for ${scopeDescription}?${expiry ? ` Expires ${expiry.toLocaleString()}.` : ' This suppression does not expire.'}`)) return;
+  const generation = cloudflareGeneration; const button = event.currentTarget.querySelector('button'); button.disabled = true; $('#cloudflare-status').textContent = 'Adding suppression…';
+  try {
+    await api(`/api/cloudflare/zones/${encodeURIComponent($('#cloudflare-selected-zone').value)}/suppressions`, { method: 'POST', body: JSON.stringify({ email, scope, ...(expiry && { expires_at: expiry.toISOString() }) }) });
+    if (generation !== cloudflareGeneration) return;
+    event.currentTarget.reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false;
+    await loadCloudflareSuppressions(true); $('#cloudflare-status').textContent = 'Suppression accepted by Cloudflare.';
+  } catch (error) { if (generation === cloudflareGeneration) $('#cloudflare-status').textContent = `${error.message} Check the list before retrying.`; }
   finally { button.disabled = false; }
 });
 let composeKey = null;

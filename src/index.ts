@@ -14,6 +14,7 @@ import { manageDomains } from './domains';
 import { manageSelectedZoneDomains } from './cloudflare-domain-management';
 import { handleCloudflareZones } from './cloudflare-zone-api';
 import { handleCloudflareOAuth } from './cloudflare-oauth-api';
+import { manageCloudflareSuppressions } from './cloudflare-suppressions';
 import { authorizeAdmin, findKeyOwner, handleKeyResources, keyPermission, manageKeys, type KeyEnv } from './keys';
 
 interface Env extends AuthEnv, KeyEnv, InboundEnv { API_KEY: string; ASSETS: Fetcher; DELIVERY_QUEUE_NAME?: string; CLOUDFLARE_OAUTH_CLIENT_ID?: string }
@@ -107,6 +108,7 @@ export default {
       if (admin instanceof Response) return admin;
       if (request.method !== 'GET' && request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
       if (url.pathname === '/api/cloudflare/zones' || url.pathname === '/api/cloudflare/zones/available') return handleCloudflareZones(request, env, admin.id);
+      if (/\/suppressions(?:\/|$)/.test(url.pathname)) return manageCloudflareSuppressions(request, env, admin.id);
       return manageSelectedZoneDomains(request, env, admin.id);
     }
     if (url.pathname === '/api/templates' || url.pathname.startsWith('/api/templates/')) {

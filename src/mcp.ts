@@ -12,6 +12,7 @@ import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
 import { readMetrics } from './metrics';
 import { manageSelectedZoneDomains } from './cloudflare-domain-management';
 import { listSelectedCloudflareZones } from './cloudflare-zone-selection';
+import { manageCloudflareSuppressions } from './cloudflare-suppressions';
 
 const addresses = z.union([z.string(), z.array(z.string())]);
 
@@ -74,6 +75,28 @@ export async function handleMcp(request: Request, env: KeyEnv & InboundEnv & { C
     return { content: [{ type: 'text' as const, text: JSON.stringify({ data: await listSelectedCloudflareZones(env.DB, owner.id) }) }] };
   });
   const domainId = z.string().regex(/^[0-9a-f]{32}$/);
+  server.registerTool('list_suppressions', { description: 'List Cloudflare account-wide and sending-domain suppressions for the account of a selected zone. Recipient addresses are sensitive. Use read_only to assess mutability.', inputSchema: z.object({ zone_id: domainId, cursor: z.string().min(1).max(2048).optional() }).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, async ({ zone_id, cursor }) => {
+    const owner = await findKeyOwner(env);
+    if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'Verified administrator is not configured' }] };
+    const url = new URL(`/api/cloudflare/zones/${zone_id}/suppressions`, env.BETTER_AUTH_URL);
+    if (cursor) url.searchParams.set('cursor', cursor);
+    const response = await manageCloudflareSuppressions(new Request(url), env, owner.id);
+    return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
+  });
+  server.registerTool('create_suppression', { description: 'Suppress a recipient for one sending domain or the whole Cloudflare account. Only use when explicitly authorized.', inputSchema: z.object({ zone_id: domainId, email: z.email().max(320), scope: z.union([z.object({ type: z.literal('account') }).strict(), z.object({ type: z.literal('sending_domain'), value: z.string().min(1).max(253) }).strict()]), expires_at: z.iso.datetime({ offset: true }).nullable().optional(), note: z.string().max(1000).optional() }).strict(), annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } }, async ({ zone_id, ...body }) => {
+    const owner = await findKeyOwner(env);
+    if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'Verified administrator is not configured' }] };
+    const url = new URL(`/api/cloudflare/zones/${zone_id}/suppressions`, env.BETTER_AUTH_URL);
+    const response = await manageCloudflareSuppressions(new Request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), env, owner.id);
+    return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
+  });
+  server.registerTool('delete_suppression', { description: 'Remove a mutable suppression, permitting future delivery attempts. Verify the recipient and obtain explicit user authorization first.', inputSchema: z.object({ zone_id: domainId, id: z.uuid() }).strict(), annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } }, async ({ zone_id, id }) => {
+    const owner = await findKeyOwner(env);
+    if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'Verified administrator is not configured' }] };
+    const url = new URL(`/api/cloudflare/zones/${zone_id}/suppressions/${id}`, env.BETTER_AUTH_URL);
+    const response = await manageCloudflareSuppressions(new Request(url, { method: 'DELETE' }), env, owner.id);
+    return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
+  });
   server.registerTool('list_domains', { description: 'List sending domains in a selected Cloudflare zone. Enabled does not verify DNS or delivery.', inputSchema: z.object({ zone_id: domainId }).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, async ({ zone_id }) => domainTool(zone_id, '', 'GET'));
   server.registerTool('get_domain', { description: 'Get a Cloudflare sending domain by zone ID and sending-domain tag.', inputSchema: z.object({ zone_id: domainId, id: domainId }).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, async ({ zone_id, id }) => domainTool(zone_id, `/${id}`, 'GET'));
   server.registerTool('get_domain_dns', { description: 'Get Cloudflare Email Sending DNS records for a domain.', inputSchema: z.object({ zone_id: domainId, id: domainId }).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, async ({ zone_id, id }) => domainTool(zone_id, `/${id}/dns`, 'GET'));
