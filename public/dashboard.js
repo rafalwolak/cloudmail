@@ -568,7 +568,7 @@ async function loadWebhooks(append = false) {
   $('#empty-webhooks').hidden = list.children.length > 0 || result.data.length > 0;
   for (const webhook of result.data) {
     const item = document.createElement('li'); const endpoint = document.createElement('strong'); endpoint.textContent = webhook.endpoint;
-    const events = document.createElement('span'); events.textContent = webhook.events.join(', ');
+    const events = document.createElement('span'); events.textContent = `${webhook.status} · ${webhook.events.join(', ')}`;
     const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Delivery attempts';
     const content = document.createElement('div'); details.append(summary, content);
     details.addEventListener('toggle', async () => {
@@ -650,7 +650,15 @@ async function loadWebhooks(append = false) {
       try { await api(`/api/webhooks/${encodeURIComponent(webhook.id)}`, { method: 'DELETE' }); await loadWebhooks(); $('#webhook-status').textContent = 'Webhook deleted.'; }
       catch (error) { $('#webhook-status').textContent = error.message; remove.disabled = false; }
     });
-    item.append(endpoint, events, details, edit, rotate, remove); list.append(item);
+    const toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'text-button'; toggle.textContent = webhook.status === 'enabled' ? 'Disable' : 'Enable'; toggle.setAttribute('aria-label', `${toggle.textContent} webhook ${webhook.endpoint}`);
+    toggle.addEventListener('click', async () => {
+      const status = webhook.status === 'enabled' ? 'disabled' : 'enabled';
+      if (status === 'disabled' && !window.confirm('Disable this webhook? Pending deliveries pause and new events are not queued. In-flight requests may finish.')) return;
+      toggle.disabled = true;
+      try { await api(`/api/webhooks/${encodeURIComponent(webhook.id)}`, { method: 'PATCH', body: JSON.stringify({ status }) }); await loadWebhooks(); $('#webhook-status').textContent = `Webhook ${status}.`; }
+      catch (error) { $('#webhook-status').textContent = error.message; toggle.disabled = false; }
+    });
+    item.append(endpoint, events, details, edit, toggle, rotate, remove); list.append(item);
   }
 }
 $('#more-webhooks').addEventListener('click', async event => {

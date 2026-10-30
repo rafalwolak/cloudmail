@@ -8,12 +8,12 @@ test('webhook delivery retrieval and replay preserve the stored payload in D1', 
   const worker = new Miniflare({ workers: [{ config: { name: 'webhook-test', compatibilityDate: '2026-10-23', manifest: { mainModule: 'worker.mjs', modules: { 'worker.mjs': { type: 'esm', contents: bundle.outputFiles[0].text } } }, env: { DB: { type: 'd1', id: 'webhook-test-db' } } } }] });
   try {
     const db = await worker.getD1Database('DB');
-    await db.exec("CREATE TABLE webhooks (id TEXT PRIMARY KEY, endpoint TEXT, events TEXT, created_at TEXT); CREATE TABLE delivery_events (id TEXT PRIMARY KEY, type TEXT, occurred_at TEXT); CREATE TABLE webhook_deliveries (id TEXT PRIMARY KEY, webhook_id TEXT, event_id TEXT, state TEXT DEFAULT 'pending', attempts INTEGER DEFAULT 0, next_attempt TEXT, last_status INTEGER, lease_until TEXT, replay_of TEXT, payload TEXT, event_type TEXT, manual_once INTEGER DEFAULT 0); CREATE TABLE webhook_attempts (delivery_id TEXT, attempt_number INTEGER, attempted_at TEXT, status INTEGER, error TEXT, response TEXT, response_truncated INTEGER DEFAULT 0)");
+    await db.exec("CREATE TABLE webhooks (id TEXT PRIMARY KEY, endpoint TEXT, events TEXT, created_at TEXT, status TEXT DEFAULT 'enabled'); CREATE TABLE delivery_events (id TEXT PRIMARY KEY, type TEXT, occurred_at TEXT); CREATE TABLE webhook_deliveries (id TEXT PRIMARY KEY, webhook_id TEXT, event_id TEXT, state TEXT DEFAULT 'pending', attempts INTEGER DEFAULT 0, next_attempt TEXT, last_status INTEGER, lease_until TEXT, replay_of TEXT, payload TEXT, event_type TEXT, manual_once INTEGER DEFAULT 0); CREATE TABLE webhook_attempts (delivery_id TEXT, attempt_number INTEGER, attempted_at TEXT, status INTEGER, error TEXT, response TEXT, response_truncated INTEGER DEFAULT 0)");
     const webhook = '00000000-0000-4000-8000-000000000001'; const delivery = '12345678901234567890123456789012';
     const payload = { type: 'email.delivery_delayed', data: { to: ['recipient@example.com'] } };
-    await db.prepare('INSERT INTO webhooks VALUES (?, ?, ?, ?)').bind(webhook, 'https://example.com', '[]', '2030-01-01T00:00:00.000Z').run();
+    await db.prepare('INSERT INTO webhooks (id, endpoint, events, created_at) VALUES (?, ?, ?, ?)').bind(webhook, 'https://example.com', '[]', '2030-01-01T00:00:00.000Z').run();
     const otherWebhook = '00000000-0000-4000-8000-000000000002';
-    await db.prepare('INSERT INTO webhooks VALUES (?, ?, ?, ?)').bind(otherWebhook, 'https://other.example.com', '[]', '2030-01-01T00:00:00.000Z').run();
+    await db.prepare('INSERT INTO webhooks (id, endpoint, events, created_at) VALUES (?, ?, ?, ?)').bind(otherWebhook, 'https://other.example.com', '[]', '2030-01-01T00:00:00.000Z').run();
     const firstPage = await (await worker.dispatchFetch('http://localhost/webhooks?limit=1')).json();
     assert.equal(firstPage.has_more, true); assert.equal(firstPage.data[0].id, otherWebhook);
     const secondPage = await (await worker.dispatchFetch(`http://localhost/webhooks?limit=1&after=${otherWebhook}`)).json();
@@ -31,6 +31,11 @@ test('webhook delivery retrieval and replay preserve the stored payload in D1', 
     assert.equal(event.object, 'webhook_event'); assert.equal(event.next_attempt_at, '2030-01-01T00:00:00.000Z'); assert.deepEqual(event.payload, payload);
     assert.equal((await worker.dispatchFetch(`http://localhost/webhooks/${webhook}/events?before=${delivery}`)).status, 400);
     const resendReplay = `http://localhost/webhooks/${webhook}/events/${delivery}/replay`;
+    const setStatus = status => worker.dispatchFetch(`http://localhost/webhooks/${webhook}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status }) });
+    assert.equal((await setStatus('disabled')).status, 200);
+    assert.equal((await worker.dispatchFetch(resendReplay, { method: 'POST' })).status, 422);
+    assert.equal((await setStatus('enabled')).status, 200);
+    assert.equal((await setStatus('invalid')).status, 400);
     assert.equal((await worker.dispatchFetch(resendReplay, { method: 'POST' })).status, 409);
     await db.prepare("UPDATE webhook_deliveries SET state = 'failed' WHERE id = ?").bind(delivery).run();
     const manual = await worker.dispatchFetch(resendReplay, { method: 'POST' });

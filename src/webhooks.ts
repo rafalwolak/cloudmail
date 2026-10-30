@@ -41,10 +41,10 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
   const eventReplay = path.match(/^\/webhooks\/([0-9a-f-]{36})\/events\/([0-9a-f]{32})\/replay$/);
   if (eventReplay && request.method === 'POST') {
     if (new URL(request.url).search) return json({ message: 'Unsupported query parameter' }, 400);
-    const result = await env.DB.prepare("UPDATE webhook_deliveries SET state = 'pending', next_attempt = ?, lease_until = NULL, manual_once = 1 WHERE webhook_id = ? AND id = ? AND state IN ('delivered', 'failed') AND payload IS NOT NULL").bind(new Date().toISOString(), eventReplay[1], eventReplay[2]).run();
+    const result = await env.DB.prepare("UPDATE webhook_deliveries SET state = 'pending', next_attempt = ?, lease_until = NULL, manual_once = 1 WHERE webhook_id = ? AND id = ? AND state IN ('delivered', 'failed') AND payload IS NOT NULL AND EXISTS (SELECT 1 FROM webhooks WHERE id = webhook_id AND status = 'enabled')").bind(new Date().toISOString(), eventReplay[1], eventReplay[2]).run();
     if (result.meta.changes) return json({ object: 'webhook_event', id: eventReplay[2] });
-    const existing = await env.DB.prepare('SELECT id, payload FROM webhook_deliveries WHERE webhook_id = ? AND id = ?').bind(eventReplay[1], eventReplay[2]).first<{ id: string; payload: string | null }>();
-    return existing ? json({ message: existing.payload === null ? 'Event payload is unavailable' : 'Event delivery is already pending or in progress' }, existing.payload === null ? 422 : 409) : json({ message: 'Not found' }, 404);
+    const existing = await env.DB.prepare('SELECT d.id, d.payload, w.status FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id WHERE d.webhook_id = ? AND d.id = ?').bind(eventReplay[1], eventReplay[2]).first<{ id: string; payload: string | null; status: string }>();
+    return existing ? json({ message: existing.status === 'disabled' ? 'Webhook is disabled' : existing.payload === null ? 'Event payload is unavailable' : 'Event delivery is already pending or in progress' }, existing.status === 'disabled' || existing.payload === null ? 422 : 409) : json({ message: 'Not found' }, 404);
   }
   const eventAttempts = path.match(/^\/webhooks\/([0-9a-f-]{36})\/events\/([0-9a-f]{32})\/attempts$/);
   if (eventAttempts && request.method === 'GET') {
@@ -90,7 +90,7 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
     }
     const direction = before !== null ? 'ASC' : 'DESC';
     const condition = anchor ? `WHERE (created_at, id) ${before !== null ? '>' : '<'} (?, ?)` : '';
-    const rows = await env.DB.prepare(`SELECT id, endpoint, events, created_at FROM webhooks ${condition} ORDER BY created_at ${direction}, id ${direction} LIMIT ?`).bind(...(anchor ? [anchor.created_at, anchor.id] : []), Number(raw) + 1).all<{ id: string; endpoint: string; events: string; created_at: string }>();
+    const rows = await env.DB.prepare(`SELECT id, endpoint, events, status, created_at FROM webhooks ${condition} ORDER BY created_at ${direction}, id ${direction} LIMIT ?`).bind(...(anchor ? [anchor.created_at, anchor.id] : []), Number(raw) + 1).all<{ id: string; endpoint: string; events: string; status: string; created_at: string }>();
     const page = rows.results.slice(0, Number(raw)); if (before !== null) page.reverse();
     return json({ object: 'list', has_more: rows.results.length > Number(raw), data: page.map(row => ({ ...row, events: JSON.parse(row.events) })) });
   }
@@ -116,7 +116,7 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
   const replay = path.match(/^\/webhooks\/([0-9a-f-]{36})\/deliveries\/([0-9a-f]{32})\/replay$/);
   if (replay && request.method === 'POST') {
     const id = crypto.randomUUID().replaceAll('-', '');
-    const result = await env.DB.prepare("INSERT INTO webhook_deliveries (id, webhook_id, event_id, next_attempt, replay_of, payload, event_type) SELECT ?, webhook_id, event_id, ?, id, payload, event_type FROM webhook_deliveries WHERE webhook_id = ? AND id = ?").bind(id, new Date().toISOString(), replay[1], replay[2]).run();
+    const result = await env.DB.prepare("INSERT INTO webhook_deliveries (id, webhook_id, event_id, next_attempt, replay_of, payload, event_type) SELECT ?, webhook_id, event_id, ?, id, payload, event_type FROM webhook_deliveries WHERE webhook_id = ? AND id = ? AND EXISTS (SELECT 1 FROM webhooks WHERE id = webhook_id AND status = 'enabled')").bind(id, new Date().toISOString(), replay[1], replay[2]).run();
     return result.meta.changes ? json({ id, replay_of: replay[2] }, 201) : json({ message: 'Not found' }, 404);
   }
   const deliveryDetail = path.match(/^\/webhooks\/([0-9a-f-]{36})\/deliveries\/([0-9a-f]{32})$/);
@@ -153,15 +153,15 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
   const match = path.match(/^\/webhooks\/([0-9a-f-]{36})$/);
   if (!match) return json({ message: 'Not found' }, 404);
   if (request.method === 'GET') {
-    const row = await env.DB.prepare('SELECT id, endpoint, events, created_at FROM webhooks WHERE id = ?').bind(match[1]).first<{ id: string; endpoint: string; events: string; created_at: string }>();
+    const row = await env.DB.prepare('SELECT id, endpoint, events, status, created_at FROM webhooks WHERE id = ?').bind(match[1]).first<{ id: string; endpoint: string; events: string; status: string; created_at: string }>();
     return row ? json({ object: 'webhook', ...row, events: JSON.parse(row.events) }) : json({ message: 'Not found' }, 404);
   }
   if (request.method === 'PATCH') {
     let body: unknown; try { body = await request.json(); } catch { return json({ message: 'Invalid JSON' }, 400); }
     if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ message: 'Invalid webhook' }, 400);
     const value = body as Record<string, unknown>;
-    if (!Object.keys(value).length || Object.keys(value).some(key => !['endpoint', 'events'].includes(key)) || (value.endpoint !== undefined && !validWebhookUrl(value.endpoint)) || (value.events !== undefined && !validEvents(value.events))) return json({ message: 'Invalid webhook' }, 400);
-    const result = await env.DB.prepare('UPDATE webhooks SET endpoint = COALESCE(?, endpoint), events = COALESCE(?, events) WHERE id = ?').bind(value.endpoint ?? null, value.events !== undefined ? JSON.stringify(value.events) : null, match[1]).run();
+    if (!Object.keys(value).length || Object.keys(value).some(key => !['endpoint', 'events', 'status'].includes(key)) || (value.endpoint !== undefined && !validWebhookUrl(value.endpoint)) || (value.events !== undefined && !validEvents(value.events)) || (value.status !== undefined && value.status !== 'enabled' && value.status !== 'disabled')) return json({ message: 'Invalid webhook' }, 400);
+    const result = await env.DB.prepare('UPDATE webhooks SET endpoint = COALESCE(?, endpoint), events = COALESCE(?, events), status = COALESCE(?, status) WHERE id = ?').bind(value.endpoint ?? null, value.events !== undefined ? JSON.stringify(value.events) : null, value.status ?? null, match[1]).run();
     return result.meta.changes ? json({ object: 'webhook', id: match[1] }) : json({ message: 'Not found' }, 404);
   }
   if (request.method === 'DELETE') {
@@ -175,9 +175,9 @@ interface Pending { id: string; endpoint: string; signing_secret: string; previo
 export async function processWebhooks(env: AuthEnv): Promise<void> {
   const now = new Date().toISOString();
   await env.DB.prepare('UPDATE webhooks SET previous_secret = NULL, previous_secret_expires_at = NULL WHERE previous_secret_expires_at <= ?').bind(now).run();
-  const due = await env.DB.prepare("SELECT id FROM webhook_deliveries WHERE (state = 'pending' AND next_attempt <= ?) OR (state = 'sending' AND lease_until <= ?) ORDER BY next_attempt LIMIT 20").bind(now, now).all<{ id: string }>();
+  const due = await env.DB.prepare("SELECT d.id FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id WHERE w.status = 'enabled' AND ((d.state = 'pending' AND d.next_attempt <= ?) OR (d.state = 'sending' AND d.lease_until <= ?)) ORDER BY d.next_attempt LIMIT 20").bind(now, now).all<{ id: string }>();
   for (const { id } of due.results) {
-    const claimed = await env.DB.prepare("UPDATE webhook_deliveries SET state = 'sending', lease_until = ?, attempts = attempts + 1 WHERE id = ? AND ((state = 'pending' AND next_attempt <= ?) OR (state = 'sending' AND lease_until <= ?)) RETURNING attempts").bind(new Date(Date.now() + 60000).toISOString(), id, now, now).first<{ attempts: number }>();
+    const claimed = await env.DB.prepare("UPDATE webhook_deliveries SET state = 'sending', lease_until = ?, attempts = attempts + 1 WHERE id = ? AND EXISTS (SELECT 1 FROM webhooks WHERE id = webhook_id AND status = 'enabled') AND ((state = 'pending' AND next_attempt <= ?) OR (state = 'sending' AND lease_until <= ?)) RETURNING attempts").bind(new Date(Date.now() + 60000).toISOString(), id, now, now).first<{ attempts: number }>();
     if (!claimed) continue;
     const row = await env.DB.prepare('SELECT d.id, d.attempts, d.event_type, d.manual_once, w.endpoint, w.signing_secret, w.previous_secret, w.previous_secret_expires_at, e.id AS event_id, e.type, e.recipient, e.occurred_at, e.details, e.provider_id FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id JOIN delivery_events e ON e.id = d.event_id WHERE d.id = ?').bind(id).first<Pending>();
     if (!row) continue;

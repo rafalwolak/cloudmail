@@ -16,5 +16,13 @@ test('deferred events select and preserve the subscribed webhook name', async ()
     await db.prepare("INSERT INTO delivery_events VALUES ('event1', 'deferred')").run();
     const result = await db.prepare('SELECT webhook_id, event_type FROM webhook_deliveries ORDER BY webhook_id').all();
     assert.deepEqual(result.results, [{ webhook_id: 'both', event_type: 'email.delivery_delayed' }, { webhook_id: 'legacy', event_type: 'email.deferred' }, { webhook_id: 'resend', event_type: 'email.delivery_delayed' }]);
+    const statusMigration = await readFile(new URL('../migrations/0037_webhook_status.sql', import.meta.url), 'utf8');
+    const statusTrigger = statusMigration.indexOf('CREATE TRIGGER');
+    for (const statement of statusMigration.slice(0, statusTrigger).split(';').map(s => s.trim()).filter(Boolean)) await db.prepare(statement).run();
+    await db.prepare(statusMigration.slice(statusTrigger).trim()).run();
+    await db.prepare("UPDATE webhooks SET status = 'disabled' WHERE id = 'resend'").run();
+    await db.prepare("INSERT INTO delivery_events VALUES ('event2', 'deferred')").run();
+    const enabled = await db.prepare("SELECT webhook_id FROM webhook_deliveries WHERE event_id = 'event2' ORDER BY webhook_id").all();
+    assert.deepEqual(enabled.results, [{ webhook_id: 'both' }, { webhook_id: 'legacy' }]);
   } finally { await worker.dispose(); }
 });
