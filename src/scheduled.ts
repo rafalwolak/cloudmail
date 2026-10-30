@@ -85,13 +85,21 @@ export async function processScheduled(env: ScheduleEnv): Promise<void> {
   for (const { id } of rows.results) {
     const claimed = await env.DB.prepare("UPDATE scheduled_emails SET state = 'sending' WHERE id = ? AND state = 'scheduled' AND scheduled_at <= ? RETURNING payload, payload_r2_key").bind(id, new Date().toISOString()).first<{ payload: string | null; payload_r2_key: string | null }>();
     if (!claimed) continue;
+    let email: OutboundEmail;
     try {
       const object = claimed.payload_r2_key ? await env.INBOUND.get(claimed.payload_r2_key) : null;
       const payload = claimed.payload_r2_key ? await object?.text() : claimed.payload;
       if (!payload) throw new Error('Scheduled payload is unavailable');
-      const email = JSON.parse(payload) as OutboundEmail;
+      email = JSON.parse(payload) as OutboundEmail;
       await storeSentContent(env.INBOUND, id, email);
       await env.DB.prepare('UPDATE email_history SET body_stored = 1 WHERE id = ?').bind(id).run();
+    } catch {
+      // No send call has started, so returning the claim is safe to retry.
+      await env.DB.prepare("UPDATE scheduled_emails SET state = 'scheduled' WHERE id = ? AND state = 'sending'").bind(id).run();
+      console.error('Could not prepare scheduled email; will retry');
+      continue;
+    }
+    try {
       const { tags: _tags, ...message } = email;
       const sent = await env.EMAIL.send(message);
       await env.DB.batch([
