@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "aphoristic-cadence",
+        "value": "*",
+        "files": [
+          "public/dashboard.html"
+        ],
+        "createdAt": "2026-10-30T13:32:43.346Z",
+        "reason": "Reviewed: the detected sentences belong to separate explanatory and hidden empty-state elements, not a repeated copy pattern."
+      }
+    ]
+  }
+}
