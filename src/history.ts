@@ -10,6 +10,10 @@ export async function digest(value: string): Promise<string> {
   return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
+export function serializeRecipients(value: string | string[] | undefined): string {
+  return JSON.stringify(value === undefined ? [] : Array.isArray(value) ? value : [value]);
+}
+
 export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idempotencyKey?: string): Promise<{ id: string }> {
   const id = crypto.randomUUID();
   const to = Array.isArray(email.to) ? email.to : [email.to];
@@ -19,8 +23,8 @@ export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idem
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     await env.DB.prepare('UPDATE email_history SET idempotency_key_hash = NULL WHERE idempotency_key_hash = ? AND created_at < ?').bind(keyHash, cutoff).run();
   }
-  const insert = await env.DB.prepare('INSERT INTO email_history (id, sender, recipients, subject, status, created_at, idempotency_key_hash, request_hash, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(idempotency_key_hash) DO NOTHING')
-    .bind(id, email.from, JSON.stringify(to), email.subject, 'pending', new Date().toISOString(), keyHash, requestHash, JSON.stringify(email.tags ?? [])).run();
+  const insert = await env.DB.prepare('INSERT INTO email_history (id, sender, recipients, subject, status, created_at, idempotency_key_hash, request_hash, tags, cc, bcc, reply_to) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(idempotency_key_hash) DO NOTHING')
+    .bind(id, email.from, JSON.stringify(to), email.subject, 'pending', new Date().toISOString(), keyHash, requestHash, JSON.stringify(email.tags ?? []), serializeRecipients(email.cc), serializeRecipients(email.bcc), email.replyTo ?? null).run();
   if (!insert.meta.changes) {
     const existing = await env.DB.prepare('SELECT id, request_hash, status FROM email_history WHERE idempotency_key_hash = ?').bind(keyHash).first<{ id: string; request_hash: string; status: string }>();
     if (!existing || existing.request_hash !== requestHash) throw new IdempotencyConflict('invalid_idempotent_request');
@@ -41,7 +45,7 @@ export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idem
   return { id };
 }
 
-interface HistoryRow { id: string; sender: string; recipients: string; subject: string; status: string; created_at: string; tags: string; schedule_state: string | null; scheduled_at: string | null }
+interface HistoryRow { id: string; sender: string; recipients: string; subject: string; status: string; created_at: string; tags: string; cc: string | null; bcc: string | null; reply_to: string | null; schedule_state: string | null; scheduled_at: string | null }
 function format(row: HistoryRow) {
   return { id: row.id, from: row.sender, to: JSON.parse(row.recipients), subject: row.subject, status: row.schedule_state ?? row.status, scheduled_at: row.scheduled_at, created_at: row.created_at, tags: JSON.parse(row.tags) };
 }
@@ -92,8 +96,8 @@ export async function readHistory(request: Request, env: AuthEnv): Promise<Respo
     return Response.json({ object: 'list', data: result.results.slice(0, Number(raw)).map(event => ({ ...event, details: JSON.parse(event.details) })), has_more: result.results.length > Number(raw) }, { headers: { 'cache-control': 'no-store' } });
   }
   const id = url.pathname.slice('/emails/'.length);
-  const row = await env.DB.prepare(`SELECT ${fields}, provider_id FROM ${tables} WHERE email_history.id = ?`).bind(id).first<HistoryRow & { provider_id: string | null }>();
+  const row = await env.DB.prepare(`SELECT ${fields}, provider_id, cc, bcc, reply_to FROM ${tables} WHERE email_history.id = ?`).bind(id).first<HistoryRow & { provider_id: string | null }>();
   if (!row) return Response.json({ message: 'Not found' }, { status: 404 });
   const events = row.provider_id ? await env.DB.prepare('SELECT recipient, type, occurred_at, details FROM delivery_events WHERE provider_id = ? ORDER BY occurred_at ASC, id ASC LIMIT 101').bind(row.provider_id).all<{ recipient: string; type: string; occurred_at: string; details: string }>() : { results: [] }; 
-  return Response.json({ ...format(row), delivery_events: events.results.slice(0, 100).map(event => ({ ...event, details: JSON.parse(event.details) })), delivery_events_has_more: events.results.length > 100 }, { headers: { 'cache-control': 'no-store' } });
+  return Response.json({ ...format(row), cc: row.cc === null ? null : JSON.parse(row.cc), bcc: row.bcc === null ? null : JSON.parse(row.bcc), reply_to: row.reply_to, delivery_events: events.results.slice(0, 100).map(event => ({ ...event, details: JSON.parse(event.details) })), delivery_events_has_more: events.results.length > 100 }, { headers: { 'cache-control': 'no-store' } });
 }

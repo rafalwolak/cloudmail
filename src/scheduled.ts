@@ -1,6 +1,6 @@
 import type { AuthEnv } from './auth';
 import type { OutboundEmail } from './email';
-import { IdempotencyConflict, digest } from './history';
+import { IdempotencyConflict, digest, serializeRecipients } from './history';
 
 export function validateSchedule(value: unknown): string | null {
   if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d)$/.test(value)) return null;
@@ -16,7 +16,7 @@ export async function scheduleEmail(env: AuthEnv, email: OutboundEmail, schedule
   if (keyHash) await env.DB.prepare('UPDATE email_history SET idempotency_key_hash = NULL WHERE idempotency_key_hash = ? AND created_at < ?').bind(keyHash, new Date(Date.now() - 86400000).toISOString()).run();
   const now = new Date().toISOString();
   const results = await env.DB.batch([
-    env.DB.prepare("INSERT INTO email_history (id, sender, recipients, subject, status, created_at, idempotency_key_hash, request_hash, tags) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?) ON CONFLICT(idempotency_key_hash) DO NOTHING").bind(id, email.from, JSON.stringify(Array.isArray(email.to) ? email.to : [email.to]), email.subject, now, keyHash, requestHash, JSON.stringify(email.tags ?? [])),
+    env.DB.prepare("INSERT INTO email_history (id, sender, recipients, subject, status, created_at, idempotency_key_hash, request_hash, tags, cc, bcc, reply_to) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(idempotency_key_hash) DO NOTHING").bind(id, email.from, JSON.stringify(Array.isArray(email.to) ? email.to : [email.to]), email.subject, now, keyHash, requestHash, JSON.stringify(email.tags ?? []), serializeRecipients(email.cc), serializeRecipients(email.bcc), email.replyTo ?? null),
     env.DB.prepare("INSERT INTO scheduled_emails (id, scheduled_at, state, payload) SELECT id, ?, 'scheduled', ? FROM email_history WHERE id = ?").bind(scheduledAt, JSON.stringify(email), id),
   ]);
   if (!results[0].meta.changes) {

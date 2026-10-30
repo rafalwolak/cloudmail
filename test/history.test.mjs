@@ -24,6 +24,20 @@ test('email history requires authorization', async () => {
   assert.equal((await fetch(`${base}/emails`)).status, 401);
 });
 
+test('immediate and scheduled email details retain cc, bcc and reply-to', async () => {
+  for (const scheduled of [false, true]) {
+    const message = { from: 'sender@example.com', to: 'to@example.com', cc: 'copy@example.com', bcc: ['private@example.com'], reply_to: 'reply@example.com', subject: 'Recipients', text: 'Hello', ...(scheduled ? { scheduled_at: new Date(Date.now() + 60000).toISOString() } : {}) };
+    const send = await fetch(`${base}/emails`, { method: 'POST', headers, body: JSON.stringify(message) });
+    assert.equal(send.status, 200, await send.clone().text());
+    const { id } = await send.json();
+    const result = await (await fetch(`${base}/emails/${id}`, { headers })).json();
+    assert.deepEqual(result.cc, ['copy@example.com']);
+    assert.deepEqual(result.bcc, ['private@example.com']);
+    assert.equal(result.reply_to, 'reply@example.com');
+    if (scheduled) assert.equal((await fetch(`${base}/emails/${id}/cancel`, { method: 'POST', headers })).status, 200);
+  }
+});
+
 test('history uses stable before and after cursors', async () => {
   for (let i = 0; i < 4; i++) {
     const response = await fetch(`${base}/emails`, { method: 'POST', headers, body: JSON.stringify({ from: 'sender@example.com', to: 'recipient@example.com', subject: `Page ${i}`, text: 'Hi' }) });
