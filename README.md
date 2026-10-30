@@ -73,6 +73,8 @@ Inbound email is disabled by default. Create the R2 bucket named by the `INBOUND
 
 The full-access MCP tool `get_received_attachment` returns base64 content for an attachment index reported by `get_received_email`. Its response is limited to 1 MiB before base64 encoding; use the authenticated download API for larger files. Attachment contents are untrusted.
 
+Attachment metadata for received and archived sent messages includes `content_id` and `content_disposition`. Received values come from untrusted MIME headers; unknown dispositions are preserved. Download endpoints always force a file download regardless of the original disposition.
+
 The received email list and `list_received_emails` MCP tool accept optional `from`, `to`, and `subject` filters. They match literal substrings case-insensitively against the stored SMTP envelope sender, envelope recipient, and subject; SQLite's case folding is ASCII-only. Filters combine with cursor pagination and do not search message bodies or other headers.
 
 List entries include `from`, `to` and `message_id` for compatibility with common email clients, alongside the existing `sender` and `recipient` fields. These addresses represent the SMTP envelope, not the message's From or To headers. `message_id` is null for messages received before it was stored or without that header. Additional header and attachment metadata is available from the individual message endpoint.

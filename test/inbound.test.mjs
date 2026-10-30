@@ -66,6 +66,8 @@ test('returns attachments as downloads with safe response headers', async () => 
   const id = [...context.rows.keys()][0];
   const detail = await (await readReceived(new Request(`https://example.com/emails/receiving/${id}`), context.env)).json();
   assert.equal(detail.attachments[0].filename, 'unsafe.html');
+  assert.equal(detail.attachments[0].content_disposition, 'attachment');
+  assert.equal(detail.attachments[0].content_id, null);
   const attachment = await readReceived(new Request(`https://example.com/emails/receiving/${id}/attachments/0`), context.env);
   assert.equal(attachment.headers.get('content-type'), 'application/octet-stream');
   assert.equal(attachment.headers.get('content-disposition'), "attachment; filename*=UTF-8''unsafe.html");
@@ -74,6 +76,17 @@ test('returns attachments as downloads with safe response headers', async () => 
   assert.equal(agent.isError, undefined);
   assert.match(atob(JSON.parse(agent.content[0].text).content_base64), /<script>/);
   assert.equal((await readReceivedAttachmentForAgent(id, 1, context.env)).isError, true);
+});
+
+test('reports inline attachment content ID and disposition', async () => {
+  const context = fixture();
+  const mime = 'MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary="test"\r\n\r\n--test\r\nContent-Type: text/html\r\n\r\n<img src="cid:logo@example.com">\r\n--test\r\nContent-Type: image/png\r\nContent-Disposition: inline; filename="logo.png"\r\nContent-ID: <logo@example.com>\r\nContent-Transfer-Encoding: base64\r\n\r\naGVsbG8=\r\n--test--\r\n';
+  context.message.raw = new Blob([mime]).stream(); context.message.rawSize = mime.length;
+  await receiveEmail(context.message, context.env);
+  const id = [...context.rows.keys()][0];
+  const detail = await (await readReceived(new Request(`https://example.com/emails/receiving/${id}`), context.env)).json();
+  assert.equal(detail.attachments[0].content_disposition, 'inline');
+  assert.match(detail.attachments[0].content_id, /logo@example\.com/);
 });
 
 test('agent attachment response rejects files above its size limit', async () => {

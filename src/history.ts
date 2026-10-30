@@ -28,7 +28,7 @@ async function readScheduledContent(env: AuthEnv & { INBOUND: R2Bucket }, id: st
 }
 
 function attachmentMetadata(items: NonNullable<ReturnType<typeof parseStoredAttachments>>) {
-  return items.map((item, index) => ({ id: String(index), filename: item.filename, content_type: item.type, size: item.content.length / 4 * 3 - (item.content.endsWith('==') ? 2 : item.content.endsWith('=') ? 1 : 0) }));
+  return items.map((item, index) => ({ id: String(index), filename: item.filename, content_type: item.type, content_id: item.contentId ?? null, content_disposition: item.disposition, size: item.content.length / 4 * 3 - (item.content.endsWith('==') ? 2 : item.content.endsWith('=') ? 1 : 0) }));
 }
 
 export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idempotencyKey?: string, retainContent = true): Promise<{ id: string }> {

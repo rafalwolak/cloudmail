@@ -67,7 +67,7 @@ test('scheduled attachments are available for review until cancellation', async 
     assert.equal(created.status, 200, await created.clone().text());
     const { id } = await created.json();
     const detail = await (await call(`/emails/${id}`)).json();
-    assert.deepEqual(detail.attachments, [{ id: '0', filename: 'review.txt', content_type: 'text/plain', size }]);
+    assert.deepEqual(detail.attachments, [{ id: '0', filename: 'review.txt', content_type: 'text/plain', content_disposition: 'attachment', content_id: null, size }]);
     const file = await call(`/emails/${id}/attachments/0`);
     assert.equal(file.status, 200); assert.equal((await file.arrayBuffer()).byteLength, size);
     assert.equal((await call(`/emails/${id}/cancel`, 'POST', {})).status, 200);
