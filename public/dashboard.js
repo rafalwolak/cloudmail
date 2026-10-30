@@ -45,7 +45,7 @@ function setSignedIn(session) {
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) { $('#account').textContent = `Signed in as ${session.user.email}`; if (cloudflareConnected) $('#cloudflare-status').textContent = 'Cloudflare connected. Choose zones to manage sending domains.'; }
-  else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); $('#compose-status').textContent = ''; composeKey = null; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
+  else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); $('#compose-status').textContent = ''; composeKey = null; composeDirty = false; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
   if (!session) { inboxGeneration++; inboxFilters = {}; $('#inbox-filter').reset(); historyGeneration++; historyFilters = {}; $('#history-filter').reset(); }
 }
 let cloudflarePage = 1;
@@ -231,7 +231,9 @@ $('#cloudflare-suppression-form').addEventListener('submit', async event => {
   finally { button.disabled = false; }
 });
 let composeKey = null;
-$('#compose-form').addEventListener('input', () => { composeKey = null; });
+let composeDirty = false;
+$('#compose-form').addEventListener('input', () => { composeKey = null; composeDirty = true; });
+$('#compose-form').addEventListener('change', () => { composeKey = null; composeDirty = true; });
 $('#compose-form').addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.currentTarget; const fields = $('#compose-fields'); const message = $('#compose-status');
@@ -251,7 +253,7 @@ $('#compose-form').addEventListener('submit', async event => {
       const reader = new FileReader(); reader.onerror = () => reject(new Error('Could not read attachment.')); reader.onload = () => resolve({ filename: file.name, content: String(reader.result).split(',')[1], content_type: file.type || 'application/octet-stream' }); reader.readAsDataURL(file);
     })));
     const result = await api('/api/send', { method: 'POST', headers: { 'Idempotency-Key': composeKey }, body: JSON.stringify(payload) });
-    form.reset(); composeKey = null; message.textContent = schedule ? `Scheduled for ${schedule.toLocaleString()}. Email ID: ${result.id}. Delivery is not yet confirmed.` : `Accepted by Cloudflare. Email ID: ${result.id}. Delivery is not yet confirmed.`;
+    form.reset(); composeKey = null; composeDirty = false; message.textContent = schedule ? `Scheduled for ${schedule.toLocaleString()}. Email ID: ${result.id}. Delivery is not yet confirmed.` : `Accepted by Cloudflare. Email ID: ${result.id}. Delivery is not yet confirmed.`;
     try { await loadHistory(true); } catch { /* The email was accepted even if the history refresh fails. */ }
   } catch (error) { message.textContent = `${error.message} Check history before trying again; sending may be uncertain.`; }
   finally { fields.disabled = false; }
@@ -644,6 +646,9 @@ let templateCursor = null;
 const templateForm = $('#template-form');
 const templateStatus = $('#template-status');
 function confirmDiscard() { return !templateDirty || window.confirm('Discard unsaved template changes?'); }
+window.addEventListener('beforeunload', event => {
+  if (templateDirty || composeDirty) { event.preventDefault(); event.returnValue = ''; }
+});
 function updatePublishButton() { $('#publish-template').disabled = !templateId || templateDirty; }
 function openTemplate(template = null) {
   templateId = template?.id || null;
@@ -768,6 +773,7 @@ $('#login-form').addEventListener('submit', async (event) => {
   } catch (error) { announce(error.message); }
 });
 $('#sign-out').addEventListener('click', async () => {
+  if ((templateDirty || composeDirty) && !window.confirm('Sign out and discard unsaved changes?')) return;
   try { await api('/api/auth/sign-out', { method: 'POST', body: '{}' }); setSignedIn(null); announce('Signed out.'); }
   catch (error) { announce(error.message); }
 });
