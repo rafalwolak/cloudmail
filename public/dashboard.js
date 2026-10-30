@@ -728,11 +728,17 @@ $('#more-templates').addEventListener('click', async () => {
   try { await loadTemplates(true); } catch (error) { templateStatus.textContent = error.message; }
   finally { button.disabled = false; }
 });
-$('#preview-template').addEventListener('click', () => {
+$('#preview-template').addEventListener('click', async () => {
+  let token;
+  try { ({ token } = await api('/api/template-preview')); }
+  catch (error) { templateStatus.textContent = error.message; return; }
   const frame = document.createElement('iframe');
-  frame.id = 'template-preview-frame'; frame.title = 'Template HTML preview'; frame.setAttribute('sandbox', '');
+  frame.id = 'template-preview-frame'; frame.name = 'template-preview-frame'; frame.title = 'Template HTML preview'; frame.setAttribute('sandbox', '');
   $('#template-preview').hidden = false; $('#template-preview-content').replaceChildren(frame);
-  frame.srcdoc = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">${$('#template-html').value}`;
+  const form = document.createElement('form'); form.method = 'post'; form.action = '/api/template-preview'; form.target = frame.name;
+  const input = document.createElement('input'); input.type = 'hidden'; input.name = 'html'; input.value = $('#template-html').value;
+  const csrf = document.createElement('input'); csrf.type = 'hidden'; csrf.name = 'token'; csrf.value = token;
+  form.append(input, csrf); document.body.append(form); form.submit(); form.remove();
 });
 $('#close-template-preview').addEventListener('click', () => {
   $('#template-preview').hidden = true; $('#template-preview-content').replaceChildren(); $('#preview-template').focus();

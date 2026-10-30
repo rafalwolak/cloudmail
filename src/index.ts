@@ -1,3 +1,4 @@
+import { previewTemplate, previewToken } from './template-preview';
 import { discovery } from './discovery';
 import { checkSelectedDomainDns } from './cloudflare-dns-diagnostics';
 import { createAuth, type AuthEnv } from './auth';
@@ -70,6 +71,15 @@ export default {
     if (url.pathname.startsWith('/api/auth/')) {
       if (!authenticationConfigured(env)) return Response.json({ message: 'Authentication is not configured' }, { status: 503 });
       return createAuth(env).handler(request);
+    }
+    if (url.pathname === '/api/template-preview' && ['GET', 'POST'].includes(request.method)) {
+      const admin = await authorizeAdmin(request, env);
+      if (admin instanceof Response) return admin;
+      const token = await previewToken(env.BETTER_AUTH_SECRET, admin.sessionId);
+      if (request.method === 'GET') return Response.json({ token }, { headers: { 'cache-control': 'no-store' } });
+      const origin = request.headers.get('origin');
+      if (origin !== 'null' && origin !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
+      return previewTemplate(request, token);
     }
     if (url.pathname === '/api/send' && request.method === 'POST') {
       const admin = await authorizeAdmin(request, env);
