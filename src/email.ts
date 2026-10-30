@@ -1,3 +1,5 @@
+import mime from 'mime';
+
 export type Addresses = string | string[];
 export interface OutboundEmail {
   from: string;
@@ -32,7 +34,7 @@ function parseAttachments(value: unknown): Attachment[] | null {
     result.push({
       filename: attachment.filename,
       content: attachment.content,
-      type: typeof attachment.content_type === 'string' ? attachment.content_type : 'application/octet-stream',
+      type: typeof attachment.content_type === 'string' ? attachment.content_type : mime.getType(attachment.filename) ?? 'application/octet-stream',
       disposition: attachment.content_id === undefined ? 'attachment' : 'inline',
       ...(typeof attachment.content_id === 'string' && { contentId: attachment.content_id }),
     });

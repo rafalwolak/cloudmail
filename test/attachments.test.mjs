@@ -23,3 +23,13 @@ test('rejects invalid, remote or excessive attachments', () => {
     [{ filename: 'file', content: 'aGk=', extra: true }],
   ]) assert.equal(typeof parseEmail({ ...message, attachments }), 'string');
 });
+
+test('infers attachment MIME types when not supplied and preserves explicit values', () => {
+  const result = parseEmail({ ...message, attachments: [
+    { filename: 'document.PDF', content: 'aGk=' },
+    { filename: 'image.png', content: 'aGk=' },
+    { filename: 'unknown.unlistedextension', content: 'aGk=' },
+    { filename: 'document.pdf', content: 'aGk=', content_type: 'text/plain' },
+  ] });
+  assert.deepEqual(result.attachments.map(item => item.type), ['application/pdf', 'image/png', 'application/octet-stream', 'text/plain']);
+});
