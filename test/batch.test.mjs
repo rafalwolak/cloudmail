@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:8787';
 const key = process.env.TEST_API_KEY || 'local-test-key';
 const email = { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Batch', text: 'Hello' };
-const send = (body, idempotencyKey) => fetch(`${base}/emails/batch`, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}) }, body: JSON.stringify(body) });
+const send = (body, idempotencyKey, mode) => fetch(`${base}/emails/batch`, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}), ...(mode ? { 'x-batch-validation': mode } : {}) }, body: JSON.stringify(body) });
 
 test('batch sends multiple transactional messages and returns their ids', async () => {
   const response = await send([email, { ...email, subject: 'Second' }]);
@@ -18,6 +18,25 @@ test('batch validates every item before sending', async () => {
   assert.equal(response.status, 400);
   assert.equal((await send([])).status, 400);
   assert.equal((await send(Array(101).fill(email))).status, 400);
+});
+
+test('batch supports SDK validation modes and replays permissive errors', async () => {
+  assert.equal((await send([email], undefined, 'strict')).status, 200);
+  assert.equal((await send([email], undefined, 'invalid')).status, 400);
+  const batchKey = crypto.randomUUID();
+  const batch = [email, { ...email, to: [] }, { ...email, subject: 'Second' }];
+  const first = await send(batch, batchKey, 'permissive');
+  assert.equal(first.status, 200);
+  const result = await first.json();
+  assert.equal(result.data.length, 2);
+  assert.equal(result.errors.length, 1);
+  assert.equal(result.errors[0].index, 1);
+  assert.deepEqual(await (await send(batch, batchKey, 'permissive')).json(), result);
+  assert.equal((await send([email, { ...email, to: [], subject: 'changed' }, batch[2]], batchKey, 'permissive')).status, 409);
+  assert.equal((await send(batch, batchKey, 'strict')).status, 400);
+  const modeKey = crypto.randomUUID();
+  assert.equal((await send([email], modeKey, 'permissive')).status, 200);
+  assert.equal((await send([email], modeKey, 'strict')).status, 409);
 });
 
 test('batch idempotency returns the same ids and rejects a changed batch', async () => {
