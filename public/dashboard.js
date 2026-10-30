@@ -13,8 +13,9 @@ function showView(view) {
 }
 let resetToken = new URLSearchParams(location.search).get('token');
 const resetError = new URLSearchParams(location.search).get('error');
-const cloudflareConnected = new URLSearchParams(location.search).get('cloudflare') === 'connected';
-if (resetToken || resetError || cloudflareConnected) history.replaceState(null, '', location.pathname);
+const cloudflareResult = new URLSearchParams(location.search).get('cloudflare');
+const cloudflareConnected = cloudflareResult === 'connected';
+if (resetToken || resetError || ['connected', 'denied'].includes(cloudflareResult)) history.replaceState(null, '', location.pathname);
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => { showView(button.dataset.view); announce(''); }));
 function setSignedIn(session) {
   metricsGeneration++;
@@ -27,7 +28,8 @@ function setSignedIn(session) {
 let cloudflarePage = 1;
 async function loadCloudflareStatus() {
   const result = await api('/api/cloudflare/oauth/status');
-  if (result.connected) $('#cloudflare-status').textContent = 'Cloudflare connection saved. Choose zones to check access and manage sending domains.';
+  if (cloudflareResult === 'denied') $('#cloudflare-status').textContent = 'Cloudflare authorization was not completed. You can try again.';
+  else if (result.connected) $('#cloudflare-status').textContent = 'Cloudflare connection saved. Choose zones to check access and manage sending domains.';
   else $('#cloudflare-status').textContent = result.configured ? 'Cloudflare is not connected yet.' : 'Cloudflare connection is not available for this installation yet.';
 }
 async function loadSelectedCloudflareZones() {

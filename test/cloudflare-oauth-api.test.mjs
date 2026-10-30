@@ -29,5 +29,12 @@ test('OAuth API starts PKCE and exchanges a callback once for the initiating adm
     assert.equal(sqlite.prepare('SELECT count(*) AS count FROM cloudflare_zones WHERE user_id = ?').get('admin').count, 0);
     assert.equal((await handleCloudflareOAuth(callback(), env, 'admin')).status, 400);
     assert.equal(calls, 1);
+    const retry = await handleCloudflareOAuth(new Request('https://cloudmail.example/api/cloudflare/oauth/start', { method: 'POST' }), env, 'admin');
+    const deniedState = new URL((await retry.json()).authorization_url).searchParams.get('state');
+    const denied = () => new Request(`https://cloudmail.example/api/cloudflare/oauth/callback?state=${deniedState}&error=access_denied`);
+    const deniedResult = await handleCloudflareOAuth(denied(), env, 'admin');
+    assert.equal(deniedResult.status, 303); assert.equal(deniedResult.headers.get('location'), '/dashboard?cloudflare=denied');
+    assert.equal((await handleCloudflareOAuth(denied(), env, 'admin')).status, 400);
+    assert.equal(calls, 1);
   } finally { globalThis.fetch = original; sqlite.close(); }
 });
