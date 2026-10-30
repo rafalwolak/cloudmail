@@ -30,7 +30,7 @@ async function loadKeys() {
   for (const key of data) {
     const item = document.createElement('li');
     const name = document.createElement('span');
-    name.textContent = `${key.name} · ${key.permission === 'sending_access' ? 'Send only' : 'Full access'}`;
+    name.textContent = `${key.name} · ${key.permission === 'sending_access' ? 'Send only' : 'Full access'}${key.sending_domain ? ` · ${key.sending_domain}` : ''}`;
     const revoke = document.createElement('button');
     revoke.type = 'button'; revoke.className = 'text-button'; revoke.textContent = 'Revoke';
     revoke.setAttribute('aria-label', `Revoke ${key.name}`);
@@ -258,8 +258,8 @@ $('#sign-out').addEventListener('click', async () => {
 $('#key-form').addEventListener('submit', async (event) => {
   event.preventDefault(); announce('Creating key…');
   try {
-    const key = await api('/api/keys', { method: 'POST', body: JSON.stringify({ name: $('#key-name').value, permission: $('#key-permission').value }) });
-    $('#key-value').textContent = key.token; $('#new-key').hidden = false; $('#key-name').value = '';
+    const key = await api('/api/keys', { method: 'POST', body: JSON.stringify({ name: $('#key-name').value, permission: $('#key-permission').value, sending_domain: $('#key-domain').value.trim() || null }) });
+    $('#key-value').textContent = key.token; $('#new-key').hidden = false; $('#key-name').value = ''; $('#key-domain').value = '';
     await loadKeys(); announce('Key created. Copy it now.');
   } catch (error) { announce(error.message); }
 });

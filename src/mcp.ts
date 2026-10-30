@@ -1,7 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
-import { parseEmail } from './email';
+import { allowedSender, parseEmail } from './email';
+import type { KeyAccess } from './keys';
 import { sendBatch } from './batch';
 import { handleTemplates, resolveTemplate } from './templates';
 import { manageSchedule, scheduleEmail, validateSchedule } from './scheduled';
@@ -19,7 +20,7 @@ const emailSchema = z.object({
       attachments: z.array(z.object({ filename: z.string(), content: z.string(), content_type: z.string().optional(), content_id: z.string().optional() }).strict()).optional(),
     }).strict();
 
-export async function handleMcp(request: Request, env: AuthEnv, permission: 'full_access' | 'sending_access'): Promise<Response> {
+export async function handleMcp(request: Request, env: AuthEnv, access: KeyAccess): Promise<Response> {
   const origin = request.headers.get('origin');
   if (origin && origin !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
   const server = new McpServer({ name: 'cloudmail', version: '0.1.0' });
@@ -35,6 +36,7 @@ export async function handleMcp(request: Request, env: AuthEnv, permission: 'ful
     if (typeof resolved === 'string') return { isError: true, content: [{ type: 'text', text: resolved }] };
     const email = parseEmail(resolved);
     if (typeof email === 'string') return { isError: true, content: [{ type: 'text', text: email }] };
+    if (!allowedSender(email, access.sending_domain)) return { isError: true, content: [{ type: 'text', text: 'Sender is not permitted for this key' }] };
     try {
       const result = scheduledAt ? await scheduleEmail(env, email, scheduledAt, idempotency_key) : await sendRecordedEmail(env, email, idempotency_key);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
@@ -50,10 +52,10 @@ export async function handleMcp(request: Request, env: AuthEnv, permission: 'ful
   }, async ({ emails, idempotency_key }) => {
     const headers = new Headers({ 'content-type': 'application/json' });
     if (idempotency_key !== undefined) headers.set('Idempotency-Key', idempotency_key);
-    const response = await sendBatch(new Request(new URL('/emails/batch', env.BETTER_AUTH_URL), { method: 'POST', headers, body: JSON.stringify(emails) }), env);
+    const response = await sendBatch(new Request(new URL('/emails/batch', env.BETTER_AUTH_URL), { method: 'POST', headers, body: JSON.stringify(emails) }), env, access.sending_domain);
     return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
   });
-  if (permission === 'full_access') {
+  if (access.permission === 'full_access') {
   const historyTool = async (path: string) => {
     const response = await readHistory(new Request(new URL(path, env.BETTER_AUTH_URL)), env);
     const body = await response.json();

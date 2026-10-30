@@ -1,5 +1,5 @@
 import { createAuth, type AuthEnv } from './auth';
-import { parseEmail } from './email';
+import { allowedSender, parseEmail } from './email';
 import { handleMcp } from './mcp';
 import { sendBatch } from './batch';
 import { manageSchedule, processScheduled, scheduleEmail, validateSchedule } from './scheduled';
@@ -58,12 +58,12 @@ export default {
     if (url.pathname !== '/mcp' && !(url.pathname === '/templates' || url.pathname.startsWith('/templates/')) && !(url.pathname === '/emails/batch' && request.method === 'POST') && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && ['GET', 'PATCH', 'POST'].includes(request.method))) return Response.json({ message: 'Not found' }, { status: 404 });
     const authorization = request.headers.get('Authorization') || '';
     const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
-    const permission = env.API_KEY && token === env.API_KEY ? 'full_access' : await keyPermission(env.DB, token, env.ADMIN_EMAIL);
-    if (!permission) return Response.json({ message: 'Unauthorized' }, { status: 401 });
-    if (permission === 'sending_access' && url.pathname !== '/mcp' && !(request.method === 'POST' && (url.pathname === '/emails' || url.pathname === '/emails/batch'))) return Response.json({ message: 'Forbidden' }, { status: 403 });
-    if (url.pathname === '/mcp') return handleMcp(request, env, permission);
+    const access = env.API_KEY && token === env.API_KEY ? { permission: 'full_access' as const, sending_domain: null } : await keyPermission(env.DB, token, env.ADMIN_EMAIL);
+    if (!access) return Response.json({ message: 'Unauthorized' }, { status: 401 });
+    if (access.permission === 'sending_access' && url.pathname !== '/mcp' && !(request.method === 'POST' && (url.pathname === '/emails' || url.pathname === '/emails/batch'))) return Response.json({ message: 'Forbidden' }, { status: 403 });
+    if (url.pathname === '/mcp') return handleMcp(request, env, access);
     if (url.pathname === '/templates' || url.pathname.startsWith('/templates/')) return handleTemplates(request, env);
-    if (url.pathname === '/emails/batch' && request.method === 'POST') return sendBatch(request, env);
+    if (url.pathname === '/emails/batch' && request.method === 'POST') return sendBatch(request, env, access.sending_domain);
     if (request.method === 'GET') return readHistory(request, env);
     if (url.pathname.startsWith('/emails/')) return manageSchedule(request, env);
     let data: unknown;
@@ -78,6 +78,7 @@ export default {
     if (typeof resolved === 'string') return Response.json({ message: resolved }, { status: 400 });
     const email = parseEmail(resolved);
     if (typeof email === 'string') return Response.json({ message: email }, { status: 400 });
+    if (!allowedSender(email, access.sending_domain)) return Response.json({ message: 'Sender is not permitted for this key' }, { status: 403 });
     const idempotencyKey = request.headers.get('Idempotency-Key');
     if (idempotencyKey !== null && (idempotencyKey.length < 1 || idempotencyKey.length > 256)) return Response.json({ message: 'Idempotency-Key must be 1-256 characters', name: 'invalid_idempotency_key' }, { status: 400 });
     try {

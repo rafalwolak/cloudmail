@@ -68,3 +68,11 @@ export function parseEmail(value: unknown): OutboundEmail | string {
     ...(Array.isArray(email.tags) && { tags: email.tags }),
   };
 }
+
+// Scoped keys accept only an unambiguous mailbox and no custom headers that could alter sender identity.
+export function allowedSender(email: OutboundEmail, domain: string | null): boolean {
+  if (!domain) return true;
+  if (email.headers && Object.keys(email.headers).length > 0) return false;
+  const match = email.from.match(/^[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+)*@([A-Za-z0-9.-]+)$/);
+  return !!match && match[1].toLowerCase() === domain;
+}

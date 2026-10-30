@@ -1,5 +1,5 @@
 import type { AuthEnv } from './auth';
-import { parseEmail, type OutboundEmail } from './email';
+import { allowedSender, parseEmail, type OutboundEmail } from './email';
 import { sendRecordedEmail } from './history';
 import { resolveTemplate } from './templates';
 
@@ -8,7 +8,7 @@ async function digest(value: string): Promise<string> {
   return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-export async function sendBatch(request: Request, env: AuthEnv): Promise<Response> {
+export async function sendBatch(request: Request, env: AuthEnv, sendingDomain: string | null = null): Promise<Response> {
   let body: unknown;
   try { body = await request.json(); } catch { return Response.json({ message: 'Invalid JSON' }, { status: 400 }); }
   if (!Array.isArray(body) || body.length < 1 || body.length > 100) return Response.json({ message: 'Batch must contain 1-100 messages' }, { status: 400 });
@@ -19,6 +19,7 @@ export async function sendBatch(request: Request, env: AuthEnv): Promise<Respons
     if (typeof resolved === 'string') return Response.json({ message: resolved, index }, { status: 400 });
     const parsed = parseEmail(resolved);
     if (typeof parsed === 'string') return Response.json({ message: parsed, index }, { status: 400 });
+    if (!allowedSender(parsed, sendingDomain)) return Response.json({ message: 'Sender is not permitted for this key', index }, { status: 403 });
     emails.push(parsed);
   }
   const key = request.headers.get('Idempotency-Key');
