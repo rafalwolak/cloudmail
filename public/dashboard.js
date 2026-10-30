@@ -63,25 +63,31 @@ async function loadHistory(reset = false) {
       if (!details.open || details.dataset.loaded === 'true' || details.dataset.loading === 'true') return;
       details.dataset.loading = 'true'; content.textContent = 'Loading delivery events…';
       try {
-        const result = await api(`/api/history/${encodeURIComponent(email.id)}`);
         content.replaceChildren();
-        if (result.delivery_events.length === 0) {
-          const empty = document.createElement('p'); empty.textContent = 'No delivery events recorded. A Cloudflare event subscription is required.'; content.append(empty);
-        } else {
-          const events = document.createElement('ul');
-          for (const event of result.delivery_events) {
-            const row = document.createElement('li');
-            row.textContent = `${event.recipient} · ${event.type} · ${new Date(event.occurred_at).toLocaleString()}`;
-            if (event.details && Object.keys(event.details).length) {
-              const diagnostics = document.createElement('span');
-              diagnostics.textContent = Object.entries(event.details).map(([key, value]) => `${key.replaceAll('_', ' ')}: ${value}`).join(' · ');
-              row.append(diagnostics);
+        const events = document.createElement('ul'); content.append(events);
+        let cursor = null;
+        const more = document.createElement('button'); more.type = 'button'; more.className = 'text-button'; more.textContent = 'Load more events';
+        const load = async () => {
+          more.disabled = true;
+          try {
+            const params = new URLSearchParams({ limit: '20' }); if (cursor) params.set('after', cursor);
+            const result = await api(`/api/history/${encodeURIComponent(email.id)}/events?${params}`);
+            for (const event of result.data) {
+              const row = document.createElement('li');
+              row.textContent = `${event.recipient} · ${event.type} · ${new Date(event.occurred_at).toLocaleString()}`;
+              if (event.details && Object.keys(event.details).length) {
+                const diagnostics = document.createElement('span');
+                diagnostics.textContent = Object.entries(event.details).map(([key, value]) => `${key.replaceAll('_', ' ')}: ${value}`).join(' · ');
+                row.append(diagnostics);
+              }
+              events.append(row);
             }
-            events.append(row);
-          }
-          content.append(events);
-          if (result.delivery_events_has_more) { const note = document.createElement('p'); note.textContent = 'Only the first 100 events are shown.'; content.append(note); }
-        }
+            cursor = result.data.at(-1)?.id || cursor; more.hidden = !result.has_more;
+            if (!events.children.length) { const empty = document.createElement('p'); empty.textContent = 'No delivery events recorded. A Cloudflare event subscription is required.'; content.prepend(empty); }
+          } finally { more.disabled = false; }
+        };
+        more.addEventListener('click', async () => { try { await load(); } catch (error) { message.textContent = error.message; } });
+        content.append(more); await load();
         details.dataset.loaded = 'true';
       } catch (error) { content.textContent = `${error.message} Close and reopen to retry.`; }
       finally { delete details.dataset.loading; }

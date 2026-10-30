@@ -74,6 +74,23 @@ export async function readHistory(request: Request, env: AuthEnv): Promise<Respo
     if (before !== null) rows.reverse();
     return Response.json({ object: 'list', has_more: result.results.length > limit, data: rows.map(format) }, { headers: { 'cache-control': 'no-store' } });
   }
+  const eventsMatch = url.pathname.match(/^\/emails\/([0-9a-f-]{36})\/events$/);
+  if (eventsMatch) {
+    const params = url.searchParams;
+    if ([...params.keys()].some(key => !['limit', 'after'].includes(key)) || ['limit', 'after'].some(key => params.getAll(key).length > 1)) return Response.json({ message: 'Unsupported or duplicate query parameter' }, { status: 400 });
+    const raw = params.get('limit') ?? '20'; const after = params.get('after');
+    if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100 || after === '') return Response.json({ message: 'Invalid pagination' }, { status: 400 });
+    const email = await env.DB.prepare('SELECT provider_id FROM email_history WHERE id = ?').bind(eventsMatch[1]).first<{ provider_id: string | null }>();
+    if (!email) return Response.json({ message: 'Not found' }, { status: 404 });
+    let condition = ''; let values: string[] = [];
+    if (after !== null) {
+      const anchor = await env.DB.prepare('SELECT id, occurred_at FROM delivery_events WHERE provider_id = ? AND id = ?').bind(email.provider_id, after).first<{ id: string; occurred_at: string }>();
+      if (!anchor) return Response.json({ message: 'Invalid cursor' }, { status: 400 });
+      condition = 'AND (occurred_at, id) > (?, ?)'; values = [anchor.occurred_at, anchor.id];
+    }
+    const result = await env.DB.prepare(`SELECT id, recipient, type, occurred_at, details FROM delivery_events WHERE provider_id = ? ${condition} ORDER BY occurred_at ASC, id ASC LIMIT ?`).bind(email.provider_id, ...values, Number(raw) + 1).all<{ id: string; recipient: string; type: string; occurred_at: string; details: string }>();
+    return Response.json({ object: 'list', data: result.results.slice(0, Number(raw)).map(event => ({ ...event, details: JSON.parse(event.details) })), has_more: result.results.length > Number(raw) }, { headers: { 'cache-control': 'no-store' } });
+  }
   const id = url.pathname.slice('/emails/'.length);
   const row = await env.DB.prepare(`SELECT ${fields}, provider_id FROM ${tables} WHERE email_history.id = ?`).bind(id).first<HistoryRow & { provider_id: string | null }>();
   if (!row) return Response.json({ message: 'Not found' }, { status: 404 });

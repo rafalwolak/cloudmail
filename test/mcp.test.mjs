@@ -20,6 +20,7 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     assert.ok(tools.tools.some(tool => tool.name === 'send_email'));
     assert.ok(tools.tools.some(tool => tool.name === 'list_emails'));
     assert.ok(tools.tools.some(tool => tool.name === 'get_email'));
+    assert.ok(tools.tools.some(tool => tool.name === 'list_delivery_events'));
     const result = await client.callTool({ name: 'send_email', arguments: { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Test', text: 'Hello', tags: [{ name: 'source', value: 'mcp' }] } });
     assert.notEqual(result.isError, true);
     const id = JSON.parse(result.content[0].text).id;
@@ -28,6 +29,9 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     assert.equal((await history.json()).status, 'accepted');
     const retrieved = await client.callTool({ name: 'get_email', arguments: { id } });
     assert.equal(JSON.parse(retrieved.content[0].text).id, id);
+    const events = await client.callTool({ name: 'list_delivery_events', arguments: { id, limit: 1 } });
+    assert.notEqual(events.isError, true);
+    assert.ok(Array.isArray(JSON.parse(events.content[0].text).data));
     assert.deepEqual(JSON.parse(retrieved.content[0].text).tags, [{ name: 'source', value: 'mcp' }]);
     const listed = await client.callTool({ name: 'list_emails', arguments: { limit: 10 } });
     assert.ok(JSON.parse(listed.content[0].text).data.some(item => item.id === id));

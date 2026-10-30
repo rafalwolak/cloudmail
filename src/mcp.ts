@@ -61,6 +61,16 @@ export async function handleMcp(request: Request, env: AuthEnv): Promise<Respons
     inputSchema: z.object({ id: z.string().uuid() }).strict(),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ id }) => historyTool(`/emails/${encodeURIComponent(id)}`));
+  server.registerTool('list_delivery_events', {
+    description: 'List delivery events for an email, ordered by event time. Use the last event ID as the after cursor.',
+    inputSchema: z.object({ id: z.string().uuid(), limit: z.number().int().min(1).max(100).optional(), after: z.string().min(1).optional() }).strict(),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async ({ id, limit, after }) => {
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set('limit', String(limit));
+    if (after !== undefined) params.set('after', after);
+    return historyTool(`/emails/${id}/events?${params}`);
+  });
   const scheduleTool = async (id: string, method: 'PATCH' | 'POST', scheduledAt?: string) => {
     const path = `/emails/${id}${method === 'POST' ? '/cancel' : ''}`;
     const response = await manageSchedule(new Request(new URL(path, env.BETTER_AUTH_URL), { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(scheduledAt === undefined ? {} : { scheduled_at: scheduledAt }) }), env);
