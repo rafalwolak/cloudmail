@@ -88,7 +88,7 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
   const tables = 'email_history LEFT JOIN scheduled_emails ON scheduled_emails.id = email_history.id';
   if (url.pathname === '/emails') {
     const params = url.searchParams;
-    const allowed = ['limit', 'before', 'after', 'from', 'to', 'subject', 'status', 'last_event'];
+    const allowed = ['limit', 'before', 'after', 'from', 'to', 'recipient', 'subject', 'status', 'last_event'];
     if ([...params.keys()].some(key => !allowed.includes(key)) || allowed.some(key => params.getAll(key).length > 1)) return Response.json({ message: 'Unsupported or duplicate query parameter' }, { status: 400 });
     const raw = params.get('limit') ?? '20';
     if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) return Response.json({ message: 'limit must be between 1 and 100' }, { status: 400 });
@@ -98,12 +98,13 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
     const cursor = before ?? after;
     const conditions: string[] = [];
     const values: (string | number)[] = [];
-    for (const key of ['from', 'to', 'subject']) {
+    for (const key of ['from', 'to', 'recipient', 'subject']) {
       const value = params.get(key);
       if (value === null) continue;
       if (!value.trim() || value.length > 256) return Response.json({ message: 'Invalid filter' }, { status: 400 });
-      conditions.push(key === 'to' ? 'EXISTS (SELECT 1 FROM json_each(email_history.recipients) WHERE instr(lower(value), lower(?)) > 0)' : `instr(lower(${key === 'from' ? 'sender' : 'subject'}), lower(?)) > 0`);
+      conditions.push(key === 'recipient' ? "EXISTS (SELECT 1 FROM json_each(email_history.recipients) WHERE instr(lower(value), lower(?)) > 0 UNION ALL SELECT 1 FROM json_each(COALESCE(email_history.cc, '[]')) WHERE instr(lower(value), lower(?)) > 0 UNION ALL SELECT 1 FROM json_each(COALESCE(email_history.bcc, '[]')) WHERE instr(lower(value), lower(?)) > 0)" : key === 'to' ? 'EXISTS (SELECT 1 FROM json_each(email_history.recipients) WHERE instr(lower(value), lower(?)) > 0)' : `instr(lower(${key === 'from' ? 'sender' : 'subject'}), lower(?)) > 0`);
       values.push(value.trim());
+      if (key === 'recipient') values.push(value.trim(), value.trim());
     }
     const status = params.get('status');
     if (status !== null) {
