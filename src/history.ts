@@ -50,7 +50,7 @@ function format(row: HistoryRow) {
   return { id: row.id, from: row.sender, to: JSON.parse(row.recipients), subject: row.subject, status: row.schedule_state ?? row.status, scheduled_at: row.scheduled_at, created_at: row.created_at, tags: JSON.parse(row.tags) };
 }
 
-export async function readHistory(request: Request, env: AuthEnv): Promise<Response> {
+export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2Bucket }): Promise<Response> {
   const url = new URL(request.url);
   const fields = "email_history.id, sender, recipients, subject, status, created_at, tags, scheduled_emails.state AS schedule_state, scheduled_at";
   const tables = 'email_history LEFT JOIN scheduled_emails ON scheduled_emails.id = email_history.id';
@@ -98,6 +98,20 @@ export async function readHistory(request: Request, env: AuthEnv): Promise<Respo
   const id = url.pathname.slice('/emails/'.length);
   const row = await env.DB.prepare(`SELECT ${fields}, provider_id, cc, bcc, reply_to FROM ${tables} WHERE email_history.id = ?`).bind(id).first<HistoryRow & { provider_id: string | null }>();
   if (!row) return Response.json({ message: 'Not found' }, { status: 404 });
+  let html: string | null = null; let text: string | null = null;
+  if (row.schedule_state === 'scheduled') {
+    const scheduled = await env.DB.prepare("SELECT payload, payload_r2_key FROM scheduled_emails WHERE id = ? AND state = 'scheduled'").bind(id).first<{ payload: string | null; payload_r2_key: string | null }>();
+    if (scheduled) {
+      try {
+        const payload = scheduled.payload_r2_key ? await (await env.INBOUND.get(scheduled.payload_r2_key))?.text() : scheduled.payload;
+        if (!payload) throw new Error('Missing scheduled payload');
+        const message = JSON.parse(payload) as { html?: unknown; text?: unknown };
+        if (!message || typeof message !== 'object') throw new Error('Invalid scheduled payload');
+        html = typeof message.html === 'string' ? message.html : null;
+        text = typeof message.text === 'string' ? message.text : null;
+      } catch { return Response.json({ message: 'Scheduled content is unavailable' }, { status: 503, headers: { 'cache-control': 'no-store' } }); }
+    }
+  }
   const events = row.provider_id ? await env.DB.prepare('SELECT recipient, type, occurred_at, details FROM delivery_events WHERE provider_id = ? ORDER BY occurred_at ASC, id ASC LIMIT 101').bind(row.provider_id).all<{ recipient: string; type: string; occurred_at: string; details: string }>() : { results: [] }; 
-  return Response.json({ ...format(row), cc: row.cc === null ? null : JSON.parse(row.cc), bcc: row.bcc === null ? null : JSON.parse(row.bcc), reply_to: row.reply_to, delivery_events: events.results.slice(0, 100).map(event => ({ ...event, details: JSON.parse(event.details) })), delivery_events_has_more: events.results.length > 100 }, { headers: { 'cache-control': 'no-store' } });
+  return Response.json({ ...format(row), html, text, cc: row.cc === null ? null : JSON.parse(row.cc), bcc: row.bcc === null ? null : JSON.parse(row.bcc), reply_to: row.reply_to, delivery_events: events.results.slice(0, 100).map(event => ({ ...event, details: JSON.parse(event.details) })), delivery_events_has_more: events.results.length > 100 }, { headers: { 'cache-control': 'no-store' } });
 }

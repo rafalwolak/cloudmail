@@ -18,7 +18,8 @@ test('scheduled email can be rescheduled, canceled, and idempotently created', a
   const stored = await (await call(`/emails/${id}`)).json();
   assert.equal(stored.status, 'scheduled');
   assert.equal(stored.scheduled_at, scheduled_at);
-  assert.ok(!JSON.stringify(stored).includes(message.text));
+  assert.equal(stored.text, message.text);
+  assert.equal(stored.html, null);
   const later = new Date(Date.now() + 120000).toISOString();
   const updated = await call(`/emails/${id}`, 'PATCH', { scheduled_at: later });
   assert.equal(updated.status, 200);
@@ -27,7 +28,9 @@ test('scheduled email can be rescheduled, canceled, and idempotently created', a
   const canceled = await call(`/emails/${id}/cancel`, 'POST', {});
   assert.equal(canceled.status, 200);
   assert.deepEqual(await canceled.json(), { object: 'email', id });
-  assert.equal((await (await call(`/emails/${id}`)).json()).status, 'canceled');
+  const canceledDetails = await (await call(`/emails/${id}`)).json();
+  assert.equal(canceledDetails.status, 'canceled');
+  assert.equal(canceledDetails.text, null);
   assert.equal((await call(`/emails/${id}`, 'PATCH', { scheduled_at: later })).status, 409);
 });
 
@@ -43,6 +46,18 @@ test('relative schedules preserve idempotency across retries', async () => {
   assert.deepEqual(await retry.json(), result);
   assert.equal((await call('/emails', 'POST', { ...request, scheduled_at: 'in 2 min' }, { 'Idempotency-Key': key })).status, 409);
   assert.equal((await call(`/emails/${result.id}/cancel`, 'POST')).status, 200);
+});
+
+test('scheduled bodies stored in R2 are available until cancellation', async () => {
+  const text = 'x'.repeat(1500001);
+  const created = await call('/emails', 'POST', { ...message, text, scheduled_at: 'in 10 min' });
+  assert.equal(created.status, 200, await created.clone().text());
+  const { id } = await created.json();
+  const details = await call(`/emails/${id}`);
+  assert.equal(details.status, 200);
+  assert.equal((await details.json()).text, text);
+  assert.equal((await call(`/emails/${id}/cancel`, 'POST', {})).status, 200);
+  assert.equal((await (await call(`/emails/${id}`)).json()).text, null);
 });
 
 test('invalid schedules and attempts to cancel sent emails are rejected', async () => {
