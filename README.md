@@ -1,5 +1,7 @@
 # Cloudmail
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2Frafalwolak%2Fcloudmail)
+
 An early-stage, self-hosted transactional email service on Cloudflare Workers. This project does not yet provide Resend feature parity. It does not support marketing email.
 
 ## Current capabilities
@@ -12,9 +14,11 @@ An early-stage, self-hosted transactional email service on Cloudflare Workers. T
 
 ## Deploy
 
-Install dependencies with `npm ci`, configure a sending domain in Cloudflare Email Service, and deploy with `npx wrangler deploy`. Set a long random `API_KEY` using `npx wrangler secret put API_KEY`. Cloudflare account and plan restrictions apply.
+The Deploy to Cloudflare button provisions a D1 database and uses the `deploy` script to apply migrations before deploying. During setup, configure `BETTER_AUTH_URL` to the exact HTTPS URL of your Worker and provide a unique `BETTER_AUTH_SECRET` with at least 32 bytes of entropy. The example values are placeholders. The button has not yet been verified end to end on a separate account.
 
-Configure `BETTER_AUTH_URL` for your own deployment and replace the D1 database ID in `wrangler.jsonc` with one from your account. Apply migrations with `npx wrangler d1 migrations apply cloudmail-auth --remote` and set `BETTER_AUTH_SECRET` using `npx wrangler secret put BETTER_AUTH_SECRET`. Use a unique random secret with at least 32 bytes of entropy. To enable registration, set `AUTH_EMAIL_FROM` to an address on your verified sending domain and set `ENABLE_SIGNUP` to `true` in your deployment configuration. Keep registration disabled until you can receive verification emails. Set `ADMIN_EMAIL` to the verified email address of the installation administrator to allow that account to manage API keys. Keys stop working if the configured administrator changes. These keys currently grant access to all sending domains on the installation; domain-level authorization is not yet available. Authentication endpoints are under `/api/auth`; use `/dashboard` to register (when enabled), sign in, reset a password, and manage administrator API keys.
+For a manual deployment, run `npm ci`, create a D1 database with `npx wrangler d1 create cloudmail-auth`, and replace the placeholder `database_id` and `BETTER_AUTH_URL` in `wrangler.jsonc` with values from your account. Set `BETTER_AUTH_SECRET` using `npx wrangler secret put BETTER_AUTH_SECRET`, then run `npm run deploy`. The optional `API_KEY` secret enables the legacy installation-wide API key. Configure a sending domain in Cloudflare Email Service; account and plan restrictions apply.
+
+To enable registration, set `AUTH_EMAIL_FROM` to an address on your verified sending domain and set `ENABLE_SIGNUP` to `true` in your deployment configuration. Keep registration disabled until you can receive verification emails. Set `ADMIN_EMAIL` to the verified email address of the installation administrator to allow that account to manage API keys. Keys stop working if the configured administrator changes. These keys currently grant access to all sending domains on the installation; domain-level authorization is not yet available. Authentication endpoints are under `/api/auth`; use `/dashboard` to register (when enabled), sign in, reset a password, and manage administrator API keys.
 
 For local testing, configure `.dev.vars` with `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL=http://127.0.0.1:8787`, and `API_KEY=local-test-key`, apply migrations with `npx wrangler d1 migrations apply cloudmail-auth --local`, start `npm run dev`, and run `npm test` in another terminal. To test registration, add `ENABLE_SIGNUP=true` and `AUTH_EMAIL_FROM` to `.dev.vars`, restart the local server, then run `TEST_SIGNUP=true npm test`. Local email sending is simulated by Wrangler.
 
@@ -22,7 +26,7 @@ Never use the API for marketing email: Cloudflare Email Service supports transac
 
 ## Roadmap
 
-User and API key management, persistent message logs, domain management, inbound email, webhooks, MCP, and automated tests remain to be implemented.
+Persistent message logs, domain management, inbound email, webhooks, expanded MCP coverage, and end-to-end deployment tests remain to be implemented.
 
 ## MCP integration
 

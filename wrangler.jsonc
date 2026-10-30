@@ -18,11 +18,14 @@
     {
       "binding": "DB",
       "database_name": "cloudmail-auth",
-      "database_id": "5325bf9f-b6da-438d-9119-e24ca1fbd07b"
+      "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],
   "vars": {
-    "BETTER_AUTH_URL": "https://cloudmail.design4pro.workers.dev"
+    "BETTER_AUTH_URL": "https://example.com",
+    "ADMIN_EMAIL": "",
+    "AUTH_EMAIL_FROM": "",
+    "ENABLE_SIGNUP": "false"
   },
   "assets": {
     "directory": "./public",
