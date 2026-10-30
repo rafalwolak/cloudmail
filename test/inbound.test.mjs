@@ -24,6 +24,20 @@ test('rejects disabled, unconfigured and oversized inbound messages', async () =
     assert.ok(context.message.rejected); assert.equal(context.rows.size, 0); assert.equal(context.objects.size, 0);
   }
 });
+
+test('exposes message headers separately from SMTP envelope addresses', async () => {
+  const context = fixture();
+  const mime = 'From: Alice <alice@example.com>\r\nTo: Team: Bob <bob@example.com>, carol@example.com;\r\nCc: cc@example.com\r\nReply-To: Reply <reply@example.com>\r\nMessage-ID: <message@example.com>\r\nIn-Reply-To: <previous@example.com>\r\nReferences: <first@example.com> <previous@example.com>\r\n\r\nHello';
+  context.message.raw = new Blob([mime]).stream(); context.message.rawSize = mime.length;
+  await receiveEmail(context.message, context.env);
+  const id = [...context.rows.keys()][0];
+  const detail = await (await readReceived(new Request(`https://example.com/emails/receiving/${id}`), context.env)).json();
+  assert.equal(detail.from, 'sender@example.com'); assert.equal(detail.to, 'inbox@example.com');
+  assert.equal(detail.header_from.address, 'alice@example.com');
+  assert.deepEqual(detail.header_to[0].group.map(item => item.address), ['bob@example.com', 'carol@example.com']);
+  assert.equal(detail.cc[0].address, 'cc@example.com'); assert.equal(detail.reply_to[0].address, 'reply@example.com');
+  assert.equal(detail.in_reply_to, '<previous@example.com>'); assert.match(detail.references, /first@example.com/);
+});
 test('preserves uploaded MIME object when a D1 response is uncertain', async () => {
   const context = fixture(); context.env.DB.prepare = () => ({ bind: () => ({ run: async () => { throw new Error('D1 unavailable'); } }) });
   await assert.rejects(() => receiveEmail(context.message, context.env));
