@@ -1,2 +1,2 @@
-# Generate a unique secret with at least 32 bytes of entropy. Never use this placeholder.
-BETTER_AUTH_SECRET=replace-with-a-unique-random-secret
+# Generate a unique secret with at least 32 bytes of entropy. Do not use a shared example value.
+BETTER_AUTH_SECRET=

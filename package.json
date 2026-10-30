@@ -41,6 +41,15 @@
       },
       "AUTH_EMAIL_FROM": {
         "description": "A sender address on a domain enabled in Cloudflare Email Service."
+      },
+      "ENABLE_SIGNUP": {
+        "description": "Set to true only when your sending domain is ready and you want to allow account registration."
+      },
+      "DB": {
+        "description": "D1 database for authentication, email history, templates, and delivery events."
+      },
+      "INBOUND": {
+        "description": "Private R2 bucket for received email, scheduled messages, and sent message bodies."
       }
     }
   }
