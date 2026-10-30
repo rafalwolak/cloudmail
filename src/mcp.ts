@@ -183,13 +183,16 @@ export async function handleMcp(request: Request, env: KeyEnv & InboundEnv & { C
   });
   server.registerTool('list_emails', {
     description: 'List recorded email attempts. Accepted means accepted by Cloudflare, not confirmed delivered. preparation_retry_at indicates when a failed preparation can be retried; last_event is the latest observed recipient event, not delivery to every recipient.',
-    inputSchema: z.object({ limit: z.number().int().min(1).max(100).optional(), before: z.string().optional(), after: z.string().optional() }).strict(),
+    inputSchema: z.object({ limit: z.number().int().min(1).max(100).optional(), before: z.string().optional(), after: z.string().optional(), from: z.string().min(1).max(256).optional(), to: z.string().min(1).max(256).optional(), subject: z.string().min(1).max(256).optional() }).strict(),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async args => {
     const params = new URLSearchParams();
     if (args.limit !== undefined) params.set('limit', String(args.limit));
     if (args.before !== undefined) params.set('before', args.before);
     if (args.after !== undefined) params.set('after', args.after);
+    if (args.from !== undefined) params.set('from', args.from);
+    if (args.to !== undefined) params.set('to', args.to);
+    if (args.subject !== undefined) params.set('subject', args.subject);
     return historyTool(`/emails?${params}`);
   });
   server.registerTool('get_email', {

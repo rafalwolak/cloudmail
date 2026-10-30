@@ -88,23 +88,32 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
   const tables = 'email_history LEFT JOIN scheduled_emails ON scheduled_emails.id = email_history.id';
   if (url.pathname === '/emails') {
     const params = url.searchParams;
-    if ([...params.keys()].some(key => !['limit', 'before', 'after'].includes(key)) || ['limit', 'before', 'after'].some(key => params.getAll(key).length > 1)) return Response.json({ message: 'Unsupported or duplicate query parameter' }, { status: 400 });
+    const allowed = ['limit', 'before', 'after', 'from', 'to', 'subject'];
+    if ([...params.keys()].some(key => !allowed.includes(key)) || allowed.some(key => params.getAll(key).length > 1)) return Response.json({ message: 'Unsupported or duplicate query parameter' }, { status: 400 });
     const raw = params.get('limit') ?? '20';
     if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) return Response.json({ message: 'limit must be between 1 and 100' }, { status: 400 });
     const before = params.get('before');
     const after = params.get('after');
     if ((before !== null && after !== null) || before === '' || after === '') return Response.json({ message: 'Provide only one valid cursor' }, { status: 400 });
     const cursor = before ?? after;
-    let condition = '';
-    let values: (string | number)[] = [];
+    const conditions: string[] = [];
+    const values: (string | number)[] = [];
+    for (const key of ['from', 'to', 'subject']) {
+      const value = params.get(key);
+      if (value === null) continue;
+      if (!value.trim() || value.length > 256) return Response.json({ message: 'Invalid filter' }, { status: 400 });
+      conditions.push(key === 'to' ? 'EXISTS (SELECT 1 FROM json_each(email_history.recipients) WHERE instr(lower(value), lower(?)) > 0)' : `instr(lower(${key === 'from' ? 'sender' : 'subject'}), lower(?)) > 0`);
+      values.push(value.trim());
+    }
     if (cursor !== null) {
       const anchor = await env.DB.prepare('SELECT id, created_at FROM email_history WHERE id = ?').bind(cursor).first<{ id: string; created_at: string }>();
       if (!anchor) return Response.json({ message: 'Invalid cursor' }, { status: 400 });
-      condition = before !== null ? 'WHERE (created_at, email_history.id) > (?, ?)' : 'WHERE (created_at, email_history.id) < (?, ?)';
-      values = [anchor.created_at, anchor.id];
+      conditions.push(before !== null ? '(created_at, email_history.id) > (?, ?)' : '(created_at, email_history.id) < (?, ?)');
+      values.push(anchor.created_at, anchor.id);
     }
     const direction = before !== null ? 'ASC' : 'DESC';
     const limit = Number(raw);
+    const condition = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const result = await env.DB.prepare(`SELECT ${fields} FROM ${tables} ${condition} ORDER BY created_at ${direction}, email_history.id ${direction} LIMIT ?`).bind(...values, limit + 1).all<HistoryRow>();
     const rows = result.results.slice(0, limit);
     if (before !== null) rows.reverse();

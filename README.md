@@ -77,6 +77,8 @@ Attachment metadata for received and archived sent messages includes `content_id
 
 The received email list and `list_received_emails` MCP tool accept optional `from`, `to`, and `subject` filters. They match literal substrings case-insensitively against the stored SMTP envelope sender, envelope recipient, and subject; SQLite's case folding is ASCII-only. Filters combine with cursor pagination and do not search message bodies or other headers.
 
+Sent email history, the dashboard, and MCP `list_emails` also support `from`, `to`, and `subject` filters. These match literal substrings case-insensitively against the stored sender, primary `To` addresses, and subject; SQLite case folding is ASCII-only. Cc, Bcc, message content, and headers are not searched.
+
 List entries include `from`, `to` and `message_id` for compatibility with common email clients, alongside the existing `sender` and `recipient` fields. These addresses represent the SMTP envelope, not the message's From or To headers. `message_id` is null for messages received before it was stored or without that header. Additional header and attachment metadata is available from the individual message endpoint.
 
 Received email details expose SMTP envelope addresses as `from` and `to`, separately from the parsed `header_from`, `header_to`, `cc`, `bcc`, and `reply_to` address objects. Header addresses may contain groups and do not authenticate the sender. `message_id`, `in_reply_to`, and `references` expose the corresponding untrusted message headers for threading.

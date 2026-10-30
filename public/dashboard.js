@@ -25,7 +25,7 @@ function setSignedIn(session) {
   $('#key-value').textContent = '';
   if (session) { $('#account').textContent = `Signed in as ${session.user.email}`; if (cloudflareConnected) $('#cloudflare-status').textContent = 'Cloudflare connected. Choose zones to manage sending domains.'; }
   else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); $('#compose-status').textContent = ''; composeKey = null; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
-  if (!session) { inboxGeneration++; inboxFilters = {}; $('#inbox-filter').reset(); }
+  if (!session) { inboxGeneration++; inboxFilters = {}; $('#inbox-filter').reset(); historyGeneration++; historyFilters = {}; $('#history-filter').reset(); }
 }
 let cloudflarePage = 1;
 async function loadCloudflareStatus() {
@@ -279,12 +279,17 @@ async function loadKeys() {
   }
 }
 let historyCursor = null;
+let historyFilters = {};
+let historyGeneration = 0;
 async function loadHistory(reset = false) {
+  const generation = reset ? ++historyGeneration : historyGeneration;
   const message = $('#history-status');
   message.textContent = 'Loading email attempts…';
   const params = new URLSearchParams({ limit: '20' });
+  for (const [key, value] of Object.entries(historyFilters)) params.set(key, value);
   if (!reset && historyCursor) params.set('after', historyCursor);
   const result = await api(`/api/history?${params}`);
+  if (generation !== historyGeneration) return;
   const list = $('#history-list');
   if (reset) list.replaceChildren();
   for (const email of result.data) {
@@ -415,10 +420,20 @@ async function loadHistory(reset = false) {
     item.append(bodyDetails, recipients, details); list.append(item);
   }
   historyCursor = result.data.at(-1)?.id || null;
+  $('#empty-history').textContent = Object.keys(historyFilters).length ? 'No attempts match these filters.' : 'No email attempts yet.';
   $('#empty-history').hidden = list.children.length > 0;
   $('#load-more').hidden = !result.has_more;
   message.textContent = '';
 }
+$('#history-filter').addEventListener('submit', async event => {
+  event.preventDefault();
+  historyFilters = Object.fromEntries([...new FormData(event.currentTarget)].map(([key, value]) => [key, value.trim()]).filter(([, value]) => value));
+  try { await loadHistory(true); } catch (error) { $('#history-status').textContent = error.message; }
+});
+$('#history-clear').addEventListener('click', async () => {
+  $('#history-filter').reset(); historyFilters = {};
+  try { await loadHistory(true); } catch (error) { $('#history-status').textContent = error.message; }
+});
 $('#load-more').addEventListener('click', async () => {
   const button = $('#load-more'); button.disabled = true;
   try { await loadHistory(); } catch (error) { $('#history-status').textContent = error.message; }

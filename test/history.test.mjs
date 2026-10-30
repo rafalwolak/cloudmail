@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:8787';
 const key = process.env.TEST_API_KEY || 'local-test-key';
 const headers = { authorization: `Bearer ${key}`, 'content-type': 'application/json' };
@@ -30,6 +32,29 @@ test('accepted messages can be retrieved without claiming delivery', async () =>
 
 test('email history requires authorization', async () => {
   assert.equal((await fetch(`${base}/emails`)).status, 401);
+});
+
+test('history filters combine literal sender, recipient and subject with pagination', async () => {
+  const marker = `Search-${crypto.randomUUID()}`;
+  for (const to of ['first@example.test', 'second@example.test', 'other@example.test']) {
+    const sent = await fetch(`${base}/emails`, { method: 'POST', headers, body: JSON.stringify({ from: 'filter@example.test', to, subject: `${marker} 100%`, text: 'Hello' }) });
+    assert.equal(sent.status, 200);
+  }
+  const query = `from=FILTER%40example.test&subject=${encodeURIComponent(marker)}&to=example.test&limit=1`;
+  const first = await (await fetch(`${base}/emails?${query}`, { headers })).json();
+  assert.equal(first.data.length, 1); assert.equal(first.has_more, true);
+  const second = await (await fetch(`${base}/emails?${query}&after=${first.data[0].id}`, { headers })).json();
+  assert.equal(second.data.length, 1); assert.notEqual(second.data[0].id, first.data[0].id);
+  const exact = await (await fetch(`${base}/emails?subject=${encodeURIComponent(marker)}&to=second%40example.test`, { headers })).json();
+  assert.equal(exact.data.length, 1); assert.deepEqual(exact.data[0].to, ['second@example.test']);
+  const client = new Client({ name: 'history-filter-test', version: '1.0.0' });
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers } }));
+    const result = await client.callTool({ name: 'list_emails', arguments: { subject: marker, to: 'second@example.test' } });
+    assert.equal(JSON.parse(result.content[0].text).data[0].id, exact.data[0].id);
+  } finally { await client.close(); }
+  assert.equal((await fetch(`${base}/emails?from=`, { headers })).status, 400);
+  assert.equal((await fetch(`${base}/emails?to=a&to=b`, { headers })).status, 400);
 });
 
 test('immediate and scheduled email details retain cc, bcc and reply-to', async () => {

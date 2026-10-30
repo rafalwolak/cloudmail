@@ -29,6 +29,8 @@ test('dashboard email history requires a session', async () => {
   assert.equal((await fetch(`${base}/api/history/00000000-0000-0000-0000-000000000000`)).status, 401);
   const html = await (await fetch(`${base}/dashboard`)).text();
   assert.match(html, /id="history-list"/);
+  assert.match(html, /id="history-filter" role="search"/);
+  for (const name of ['from', 'to', 'subject']) assert.match(html, new RegExp(`<label[^>]+for="history-${name}"`));
   assert.match(html, /id="metrics-form"/);
   assert.match(html, /id="metrics-status" role="status"/);
 });
