@@ -20,7 +20,7 @@ function setSignedIn(session) {
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) $('#account').textContent = `Signed in as ${session.user.email}`;
-  else { $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
+  else { $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
 }
 async function loadKeys() {
   const { data } = await api('/api/keys');
@@ -131,6 +131,51 @@ async function loadHistory(reset = false) {
 $('#load-more').addEventListener('click', async () => {
   const button = $('#load-more'); button.disabled = true;
   try { await loadHistory(); } catch (error) { $('#history-status').textContent = error.message; }
+  finally { button.disabled = false; }
+});
+let inboxCursor = null;
+async function loadInbox(reset = false) {
+  const message = $('#inbox-status'); message.textContent = 'Loading received email…';
+  const params = new URLSearchParams({ limit: '20' });
+  if (!reset && inboxCursor) params.set('after', inboxCursor);
+  const result = await api(`/api/inbox?${params}`); const list = $('#inbox-list');
+  if (reset) list.replaceChildren();
+  for (const email of result.data) {
+    const item = document.createElement('li'); const title = document.createElement('strong'); title.textContent = email.subject || '(No subject)';
+    const metadata = document.createElement('span'); metadata.textContent = `${email.sender} → ${email.recipient} · ${new Date(email.created_at).toLocaleString()}`;
+    const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Read message';
+    const content = document.createElement('div'); details.append(summary, content);
+    details.addEventListener('toggle', async () => {
+      if (!details.open || details.dataset.loaded || details.dataset.loading) return;
+      details.dataset.loading = 'true'; content.textContent = 'Loading message…';
+      try {
+        const received = await api(`/api/inbox/${encodeURIComponent(email.id)}`); content.replaceChildren();
+        const body = document.createElement('pre'); body.className = 'inbox-body';
+        body.textContent = received.text || received.html || '(No text content)'; content.append(body);
+        if (!received.text && received.html) { const note = document.createElement('p'); note.textContent = 'HTML shown as source for safety.'; content.prepend(note); }
+        if (received.attachments.length) {
+          const heading = document.createElement('strong'); heading.textContent = 'Attachments'; content.append(heading);
+          const attachments = document.createElement('ul');
+          for (const attachment of received.attachments) {
+            const row = document.createElement('li'); const link = document.createElement('a');
+            link.href = `/api/inbox/${encodeURIComponent(email.id)}/attachments/${encodeURIComponent(attachment.id)}`;
+            link.textContent = `${attachment.filename || 'Attachment'} (${attachment.size} bytes)`; link.setAttribute('download', '');
+            row.append(link); attachments.append(row);
+          }
+          content.append(attachments);
+        }
+        details.dataset.loaded = 'true';
+      } catch (error) { content.textContent = `${error.message} Close and reopen to retry.`; }
+      finally { delete details.dataset.loading; }
+    });
+    item.append(title, metadata, details); list.append(item);
+  }
+  inboxCursor = result.data.at(-1)?.id || null; $('#inbox-more').hidden = !result.has_more;
+  $('#empty-inbox').hidden = list.children.length > 0; message.textContent = '';
+}
+$('#inbox-more').addEventListener('click', async () => {
+  const button = $('#inbox-more'); button.disabled = true;
+  try { await loadInbox(); } catch (error) { $('#inbox-status').textContent = error.message; }
   finally { button.disabled = false; }
 });
 let templateId = null;
@@ -248,7 +293,7 @@ $('#login-form').addEventListener('submit', async (event) => {
     await api('/api/auth/sign-in/email', { method: 'POST', body: JSON.stringify({ email: $('#email').value, password: $('#password').value }) });
     $('#password').value = '';
     const session = await api('/api/auth/get-session'); setSignedIn(session);
-    await loadKeys(); await loadHistory(true); await loadTemplates(); announce('Signed in.');
+    await loadKeys(); await loadHistory(true); await loadTemplates(); await loadInbox(true); announce('Signed in.');
   } catch (error) { announce(error.message); }
 });
 $('#sign-out').addEventListener('click', async () => {
@@ -283,6 +328,6 @@ async function showSetup() {
 }
 (async () => {
   try { await showSetup(); } catch { announce('Could not load installation setup status.'); }
-  try { if (resetToken) { showView('reset'); return; } if (resetError) { showView('forgot'); announce('This recovery link is invalid or has expired. Request a new one.'); return; } const session = await api('/api/auth/get-session'); setSignedIn(session); if (session) { await loadKeys(); await loadHistory(true); await loadTemplates(); } }
+  try { if (resetToken) { showView('reset'); return; } if (resetError) { showView('forgot'); announce('This recovery link is invalid or has expired. Request a new one.'); return; } const session = await api('/api/auth/get-session'); setSignedIn(session); if (session) { await loadKeys(); await loadHistory(true); await loadTemplates(); await loadInbox(true); } }
   catch (error) { announce(error.message); }
 })();

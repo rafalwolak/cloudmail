@@ -32,6 +32,13 @@ export default {
       return createAuth(env).handler(request);
     }
     if (url.pathname === '/api/keys' || url.pathname.startsWith('/api/keys/')) return manageKeys(request, env);
+    if (url.pathname === '/api/inbox' || url.pathname.startsWith('/api/inbox/')) {
+      const admin = await authorizeAdmin(request, env);
+      if (admin instanceof Response) return admin;
+      if (request.method !== 'GET') return Response.json({ message: 'Not found' }, { status: 404 });
+      url.pathname = '/emails/receiving' + url.pathname.slice('/api/inbox'.length);
+      return readReceived(new Request(url), env);
+    }
     if (url.pathname === '/api/history' || url.pathname.startsWith('/api/history/')) {
       const admin = await authorizeAdmin(request, env);
       if (admin instanceof Response) return admin;

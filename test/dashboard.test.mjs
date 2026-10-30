@@ -80,3 +80,14 @@ test('dashboard schedule changes require an administrator and a trusted origin',
   assert.equal((await (await fetch(path, { headers: { cookie } })).json()).scheduled_at, later);
   assert.equal((await fetch(`${path}/cancel`, { method: 'POST', headers: { cookie, origin: base } })).status, 200);
 });
+
+test('dashboard inbox requires an administrator session', { skip: !process.env.TEST_DASHBOARD_ADMIN }, async () => {
+  assert.equal((await fetch(`${base}/api/inbox`)).status, 401);
+  const login = await fetch(`${base}/api/auth/sign-in/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ email: process.env.TEST_DASHBOARD_ADMIN, password: process.env.TEST_DASHBOARD_PASSWORD }) });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const list = await fetch(`${base}/api/inbox?limit=1`, { headers: { cookie } });
+  assert.equal(list.status, 200); assert.equal(list.headers.get('cache-control'), 'no-store');
+  assert.ok(Array.isArray((await list.json()).data));
+  assert.equal((await fetch(`${base}/api/inbox/missing`, { headers: { cookie } })).status, 404);
+});

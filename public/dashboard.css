@@ -13,3 +13,5 @@ textarea{width:100%;min-width:0;resize:vertical;border:1px solid #667667;backgro
 .schedule-form{margin:0 0 .75rem}.schedule-form label{margin:.75rem 0 .25rem}.schedule-form input{max-width:22rem}.schedule-form>button{width:auto;display:inline-flex;margin:.5rem .5rem 0 0}.schedule-form .secondary{margin-top:.5rem}
 
 select{width:100%;border:1px solid #667667;background:#101813;color:var(--ink);padding:.85rem;font:inherit}select:focus-visible{outline:3px solid var(--accent);outline-offset:4px}
+
+.inbox-body{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;color:var(--ink);max-height:30rem;overflow:auto}.history-list details ul{padding-left:1.25rem}.history-list details ul li{border:0;padding:.25rem 0}
