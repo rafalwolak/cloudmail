@@ -35,7 +35,20 @@ export async function checkPublicDns(records: RecordData[], resolve: typeof fetc
       const body = await response.json() as { Status?: number; TC?: boolean; Answer?: { name?: string; type?: number; data?: string }[] };
       if (body.TC || (body.Status !== 0 && body.Status !== 3) || (body.Answer !== undefined && !Array.isArray(body.Answer))) return unknown;
       if (body.Answer?.some(answer => !answer || typeof answer.name !== 'string' || typeof answer.type !== 'number' || typeof answer.data !== 'string')) return unknown;
-      const answers = (body.Answer ?? []).filter(answer => typeof answer.name === 'string' && canonical(answer.name) === name && answer.type === type && typeof answer.data === 'string');
+      const all = body.Answer ?? []; const owners = new Set([name]);
+      if (type !== types.CNAME) {
+        let owner = name;
+        for (let i = 0; i < 16; i++) {
+          const aliases = all.filter(answer => answer.type === types.CNAME && canonical(answer.name!) === owner);
+          if (!aliases.length) break;
+          if (aliases.length !== 1) return unknown;
+          const target = canonical(aliases[0].data!);
+          if (!target || owners.has(target)) return unknown;
+          owners.add(target); owner = target;
+          if (i === 15 && all.some(answer => answer.type === types.CNAME && canonical(answer.name!) === owner)) return unknown;
+        }
+      }
+      const answers = all.filter(answer => owners.has(canonical(answer.name!)) && answer.type === type);
       return { ...record, status: answers.length === 0 ? 'missing' : answers.some(answer => matches(record, answer.data!)) ? 'match' : 'different' };
     } catch { return unknown; }
   }));
