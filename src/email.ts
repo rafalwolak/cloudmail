@@ -9,11 +9,35 @@ export interface OutboundEmail {
   bcc?: Addresses;
   replyTo?: string;
   headers?: Record<string, string>;
+  attachments?: Attachment[];
 }
 
-const allowedFields = new Set(['from', 'to', 'subject', 'text', 'html', 'cc', 'bcc', 'reply_to', 'headers']);
+interface Attachment { filename: string; content: string; type: string; disposition: 'attachment' | 'inline'; contentId?: string }
+
+const allowedFields = new Set(['from', 'to', 'subject', 'text', 'html', 'cc', 'bcc', 'reply_to', 'headers', 'attachments']);
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 const addresses = (value: unknown): value is Addresses => nonempty(value) || (Array.isArray(value) && value.length > 0 && value.every(nonempty));
+
+function parseAttachments(value: unknown): Attachment[] | null {
+  if (!Array.isArray(value) || value.length > 32) return null;
+  const result: Attachment[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+    const attachment = item as Record<string, unknown>;
+    if (Object.keys(attachment).some(key => !['filename', 'content', 'content_type', 'content_id'].includes(key))) return null;
+    if (!nonempty(attachment.filename) || typeof attachment.content !== 'string' || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(attachment.content)) return null;
+    if (attachment.content_type !== undefined && !nonempty(attachment.content_type)) return null;
+    if (attachment.content_id !== undefined && !nonempty(attachment.content_id)) return null;
+    result.push({
+      filename: attachment.filename,
+      content: attachment.content,
+      type: typeof attachment.content_type === 'string' ? attachment.content_type : 'application/octet-stream',
+      disposition: attachment.content_id === undefined ? 'attachment' : 'inline',
+      ...(typeof attachment.content_id === 'string' && { contentId: attachment.content_id }),
+    });
+  }
+  return result;
+}
 
 export function parseEmail(value: unknown): OutboundEmail | string {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return 'Invalid email';
@@ -26,6 +50,8 @@ export function parseEmail(value: unknown): OutboundEmail | string {
   if (email.bcc !== undefined && !addresses(email.bcc)) return 'Invalid bcc';
   if (email.reply_to !== undefined && !nonempty(email.reply_to)) return 'reply_to must be a single address';
   if (email.headers !== undefined && (!email.headers || typeof email.headers !== 'object' || Array.isArray(email.headers) || !Object.values(email.headers).every(value => typeof value === 'string'))) return 'headers must contain string values';
+  const attachments = email.attachments === undefined ? undefined : parseAttachments(email.attachments);
+  if (attachments === null) return 'Invalid attachments: use up to 32 base64-encoded files';
   const count = (v: unknown) => Array.isArray(v) ? v.length : v === undefined ? 0 : 1;
   if (count(email.to) + count(email.cc) + count(email.bcc) > 50) return 'A maximum of 50 recipients is supported';
   return {
@@ -36,5 +62,6 @@ export function parseEmail(value: unknown): OutboundEmail | string {
     ...(addresses(email.bcc) && { bcc: email.bcc }),
     ...(nonempty(email.reply_to) && { replyTo: email.reply_to }),
     ...(email.headers !== undefined && { headers: email.headers as Record<string, string> }),
+    ...(attachments !== undefined && { attachments }),
   };
 }

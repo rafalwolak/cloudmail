@@ -36,3 +36,9 @@ test('validates recipient types and combined recipient limit', async () => {
   const tooMany = await send({ ...message, to: Array(49).fill('a@example.com'), cc: ['b@example.com', 'c@example.com'], bcc: undefined });
   assert.equal(tooMany.status, 400);
 });
+
+test('accepts base64 attachments through the email API', async () => {
+  const response = await send({ ...message, attachments: [{ filename: 'hello.txt', content: 'SGVsbG8=', content_type: 'text/plain' }] });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.ok((await response.json()).id);
+});

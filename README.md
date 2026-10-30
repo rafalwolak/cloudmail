@@ -5,7 +5,7 @@ An early-stage, self-hosted transactional email service on Cloudflare Workers. T
 ## Current capabilities
 
 - `POST /emails` accepts `from`, `to`, `subject`, and `text` or `html` with a bearer API key.
-- Supports one or more `to`, `cc`, and `bcc` recipients (up to 50 total), a single `reply_to` address, and custom `headers`. Unsupported fields are rejected. Other Resend API features are not implemented.
+- Supports one or more `to`, `cc`, and `bcc` recipients (up to 50 total), a single `reply_to` address, custom `headers`, and base64 attachments with optional `content_type` and inline `content_id`. Remote attachment URLs are not supported. Unsupported fields are rejected. Other Resend API features are not implemented.
 - Better Auth provides email/password authentication backed by D1. Sign-up is disabled by default and requires a verified sending domain.
 
 ## Deploy
