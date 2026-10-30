@@ -32,6 +32,13 @@ test('webhook API creates private secrets, enqueues delivery events and exposes 
     const page = await deliveries.json(); assert.equal(page.data.length, 1);
     assert.equal(page.data[0].state, 'pending'); assert.equal(page.data[0].event_id, eventId);
     const deliveryId = page.data[0].id;
+    const snapshot = { type: 'email.delivered', data: { to: ['recipient@example.com'] } };
+    const payloadHex = Buffer.from(JSON.stringify(snapshot)).toString('hex');
+    execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--command', `UPDATE webhook_deliveries SET payload = CAST(X'${payloadHex}' AS TEXT) WHERE id = '${deliveryId}'`], { stdio: 'pipe' });
+    const detailPath = `${base}/webhooks/${id}/deliveries/${deliveryId}`;
+    assert.equal((await fetch(detailPath)).status, 401);
+    const detail = await (await fetch(detailPath, { headers })).json();
+    assert.deepEqual(detail.payload, snapshot);
     execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--command', `INSERT INTO webhook_attempts (delivery_id, attempt_number, attempted_at, status, error) VALUES ('${deliveryId}', 1, '2026-10-30T10:00:00.000Z', 503, NULL), ('${deliveryId}', 2, '2026-10-30T10:01:00.000Z', NULL, 'timeout')`], { stdio: 'pipe' });
     const attemptPath = `${base}/webhooks/${id}/deliveries/${deliveryId}/attempts`;
     assert.equal((await fetch(attemptPath)).status, 401);
@@ -41,6 +48,7 @@ test('webhook API creates private secrets, enqueues delivery events and exposes 
     const replay = await fetch(`${base}/webhooks/${id}/deliveries/${page.data[0].id}/replay`, { method: 'POST', headers });
     assert.equal(replay.status, 201);
     const replayId = (await replay.json()).id; assert.notEqual(replayId, page.data[0].id);
+    assert.deepEqual((await (await fetch(`${base}/webhooks/${id}/deliveries/${replayId}`, { headers })).json()).payload, snapshot);
     const afterReplay = await (await fetch(`${base}/webhooks/${id}/deliveries?limit=10`, { headers })).json();
     assert.equal(afterReplay.data.length, 2);
     assert.equal(afterReplay.data.find(item => item.id === replayId).replay_of, page.data[0].id);
@@ -53,6 +61,8 @@ test('webhook API creates private secrets, enqueues delivery events and exposes 
     assert.equal(JSON.parse(mcpDeliveries.content[0].text).data[0].event_id, eventId);
     const mcpAttempts = await client.callTool({ name: 'list_webhook_attempts', arguments: { id, delivery_id: deliveryId } });
     assert.deepEqual(JSON.parse(mcpAttempts.content[0].text), attemptList);
+    const mcpDelivery = await client.callTool({ name: 'get_webhook_delivery', arguments: { id, delivery_id: deliveryId } });
+    assert.deepEqual(JSON.parse(mcpDelivery.content[0].text), detail);
     const replayed = await client.callTool({ name: 'replay_webhook_delivery', arguments: { id, delivery_id: replayId } });
     assert.notEqual(replayed.isError, true);
     const fetched = await client.callTool({ name: 'get_webhook', arguments: { id } }); assert.equal(JSON.parse(fetched.content[0].text).id, id);

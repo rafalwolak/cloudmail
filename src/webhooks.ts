@@ -51,8 +51,14 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
   const replay = path.match(/^\/webhooks\/([0-9a-f-]{36})\/deliveries\/([0-9a-f]{32})\/replay$/);
   if (replay && request.method === 'POST') {
     const id = crypto.randomUUID().replaceAll('-', '');
-    const result = await env.DB.prepare("INSERT INTO webhook_deliveries (id, webhook_id, event_id, next_attempt, replay_of) SELECT ?, webhook_id, event_id, ?, id FROM webhook_deliveries WHERE webhook_id = ? AND id = ?").bind(id, new Date().toISOString(), replay[1], replay[2]).run();
+    const result = await env.DB.prepare("INSERT INTO webhook_deliveries (id, webhook_id, event_id, next_attempt, replay_of, payload) SELECT ?, webhook_id, event_id, ?, id, payload FROM webhook_deliveries WHERE webhook_id = ? AND id = ?").bind(id, new Date().toISOString(), replay[1], replay[2]).run();
     return result.meta.changes ? json({ id, replay_of: replay[2] }, 201) : json({ message: 'Not found' }, 404);
+  }
+  const deliveryDetail = path.match(/^\/webhooks\/([0-9a-f-]{36})\/deliveries\/([0-9a-f]{32})$/);
+  if (deliveryDetail && request.method === 'GET') {
+    if ([...new URL(request.url).searchParams.keys()].length) return json({ message: 'Unsupported query parameter' }, 400);
+    const row = await env.DB.prepare('SELECT d.id, d.event_id, d.state, d.attempts, d.next_attempt, d.last_status, d.replay_of, d.payload, e.type, e.occurred_at FROM webhook_deliveries d JOIN delivery_events e ON e.id = d.event_id WHERE d.webhook_id = ? AND d.id = ?').bind(deliveryDetail[1], deliveryDetail[2]).first<{ payload: string | null } & Record<string, unknown>>();
+    return row ? json({ object: 'webhook_delivery', ...row, payload: row.payload === null ? null : JSON.parse(row.payload) }) : json({ message: 'Not found' }, 404);
   }
   const attempts = path.match(/^\/webhooks\/([0-9a-f-]{36})\/deliveries\/([0-9a-f]{32})\/attempts$/);
   if (attempts && request.method === 'GET') {
@@ -112,7 +118,10 @@ export async function processWebhooks(env: AuthEnv): Promise<void> {
     if (!row) continue;
     const email = row.type === 'received' ? null : await env.DB.prepare('SELECT id, sender, subject, created_at, tags, recipients FROM email_history WHERE provider_id = ?').bind(row.provider_id).first<{ id: string; sender: string; subject: string; created_at: string; tags: string; recipients: string }>();
     const received = row.type === 'received' ? await env.DB.prepare('SELECT id, sender, recipient, subject, created_at FROM inbound_emails WHERE id = ?').bind(row.event_id.slice('received:'.length)).first<{ id: string; sender: string; recipient: string; subject: string; created_at: string }>() : null;
-    const payload = JSON.stringify({ type: `email.${row.type}`, created_at: row.occurred_at, data: { email_id: received?.id ?? email?.id ?? null, from: received?.sender ?? email?.sender ?? null, to: row.type === 'sent' && email?.recipients ? JSON.parse(email.recipients) : [row.recipient], subject: received?.subject ?? email?.subject ?? null, tags: email ? JSON.parse(email.tags) : [], details: JSON.parse(row.details) } });
+    const candidate = JSON.stringify({ type: `email.${row.type}`, created_at: row.occurred_at, data: { email_id: received?.id ?? email?.id ?? null, from: received?.sender ?? email?.sender ?? null, to: row.type === 'sent' && email?.recipients ? JSON.parse(email.recipients) : [row.recipient], subject: received?.subject ?? email?.subject ?? null, tags: email ? JSON.parse(email.tags) : [], details: JSON.parse(row.details) } });
+    const snapshot = await env.DB.prepare("UPDATE webhook_deliveries SET payload = COALESCE(payload, ?) WHERE id = ? AND state = 'sending' AND attempts = ? RETURNING payload").bind(candidate, id, row.attempts).first<{ payload: string }>();
+    if (!snapshot) continue;
+    const payload = snapshot.payload;
     let status: number | null = null; let error: string | null = null;
     const attemptedAt = new Date().toISOString();
     try {

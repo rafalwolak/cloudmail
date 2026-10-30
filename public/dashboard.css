@@ -21,3 +21,5 @@ select{width:100%;border:1px solid #667667;background:#101813;color:var(--ink);p
 .metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.75rem;margin:1.5rem 0}.metrics-grid div{border:1px solid var(--line);padding:1rem}.metrics-grid dt{color:var(--muted);font-size:.875rem}.metrics-grid dd{margin:.25rem 0 0;font-size:1.75rem;font-weight:700;line-height:1.2}
 
 #compose-fields{border:0;margin:0;padding:0;min-width:0}#compose-fields>button{width:100%;margin-top:1.5rem}
+
+.webhook-payload{white-space:pre-wrap;overflow-wrap:anywhere;max-height:24rem;overflow:auto;color:var(--muted);font-size:.875rem}

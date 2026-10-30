@@ -28,6 +28,7 @@ test('dispatch signs events and records success or schedules a retry', async () 
       async all() { return { results: [{ id: 'delivery1' }] }; },
       async first() {
         if (sql.includes('RETURNING attempts')) return { attempts: 1 };
+        if (sql.includes('RETURNING payload')) return { payload: args[0] };
         if (sql.includes('JOIN webhooks')) return { id: 'delivery1', attempts: 1, endpoint: 'https://hooks.example.com/event', signing_secret: secret, previous_secret: secret, previous_secret_expires_at: new Date(Date.now() + 3600000).toISOString(), event_id: 'event1', type: 'delivered', recipient: 'user@example.com', occurred_at: '2026-10-30T10:00:00.000Z', details: '{}', provider_id: 'provider1' };
         if (sql.includes('FROM email_history')) return { id: 'email1', sender: 'sender@example.com', subject: 'Hello', tags: '[]' };
         throw new Error(`Unexpected SQL: ${sql}`);
@@ -57,6 +58,7 @@ test('lifecycle webhooks carry correct metadata without message bodies', async (
       async all() { return { results: [{ id: 'delivery1' }] }; },
       async first() {
         if (sql.includes('RETURNING attempts')) return { attempts: 1 };
+        if (sql.includes('RETURNING payload')) return { payload: args[0] };
         if (sql.includes('JOIN webhooks')) return { id: 'delivery1', attempts: 1, endpoint: 'https://hooks.example.com/event', signing_secret: secret, event_id: `${kind}:email1`, type: kind, recipient: 'first@example.com', occurred_at: '2026-10-30T10:00:00.000Z', details: '{}', provider_id: 'provider1' };
         if (sql.includes('FROM email_history')) return { id: 'email1', sender: 'sender@example.com', subject: 'Sent', tags: '[]', recipients: '["first@example.com","second@example.com"]' };
         if (sql.includes('FROM inbound_emails')) return { id: 'email1', sender: 'sender@example.com', recipient: 'first@example.com', subject: 'Received' };
@@ -71,4 +73,24 @@ test('lifecycle webhooks carry correct metadata without message bodies', async (
     assert.equal(posts[0].data.subject, kind === 'sent' ? 'Sent' : 'Received');
     assert.ok(!('html' in posts[0].data) && !('text' in posts[0].data));
   }
+});
+
+test('webhook retries reuse the saved payload when source data changes', async () => {
+  const { processWebhooks } = await import('../src/webhooks.ts');
+  const secret = 'whsec_' + btoa('01234567890123456789012345678901');
+  let stored; let subject = 'Original'; let attempt = 0; const posts = [];
+  const env = { DB: { prepare(sql) { return { bind(...args) { return {
+    async all() { return { results: [{ id: 'delivery1' }] }; },
+    async first() {
+      if (sql.includes('RETURNING attempts')) return { attempts: ++attempt };
+      if (sql.includes('RETURNING payload')) { stored ??= args[0]; return { payload: stored }; }
+      if (sql.includes('JOIN webhooks')) return { id: 'delivery1', attempts: attempt, endpoint: 'https://hooks.example.com', signing_secret: secret, event_id: 'event1', type: 'delivered', recipient: 'user@example.com', occurred_at: '2026-10-30T10:00:00.000Z', details: '{}', provider_id: 'provider1' };
+      if (sql.includes('FROM email_history')) return { id: 'email1', sender: 'sender@example.com', subject, tags: '[]' };
+      throw new Error(`Unexpected SQL: ${sql}`);
+    }, async run() {},
+  }; } }; }, async batch(statements) { for (const statement of statements) await statement.run(); } } };
+  const original = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => { posts.push(options.body); return new Response(null, { status: 503 }); };
+  try { await processWebhooks(env); subject = 'Changed'; await processWebhooks(env); } finally { globalThis.fetch = original; }
+  assert.equal(posts.length, 2); assert.equal(posts[0], posts[1]); assert.equal(JSON.parse(posts[1]).data.subject, 'Original');
 });

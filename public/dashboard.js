@@ -226,6 +226,18 @@ async function loadWebhooks() {
             const page = await api(`/api/webhooks/${encodeURIComponent(webhook.id)}/deliveries?${params}`);
             for (const delivery of page.data) {
               const row = document.createElement('li'); const label = document.createElement('span'); label.textContent = `${delivery.type} · ${delivery.state} · ${delivery.attempts} attempts${delivery.last_status ? ` · HTTP ${delivery.last_status}` : ''} · ${new Date(delivery.occurred_at).toLocaleString()}`;
+              const payloadDetails = document.createElement('details'); const payloadSummary = document.createElement('summary'); payloadSummary.textContent = 'Saved payload';
+              const payloadContent = document.createElement('pre'); payloadContent.className = 'webhook-payload'; payloadDetails.append(payloadSummary, payloadContent);
+              payloadDetails.addEventListener('toggle', async () => {
+                if (!payloadDetails.open || payloadDetails.dataset.loaded || payloadDetails.dataset.loading) return;
+                payloadDetails.dataset.loading = 'true'; payloadContent.textContent = 'Loading payload…';
+                try {
+                  const result = await api(`/api/webhooks/${encodeURIComponent(webhook.id)}/deliveries/${encodeURIComponent(delivery.id)}`);
+                  payloadContent.textContent = result.payload === null ? 'No payload recorded yet. Older deliveries may not have a saved payload.' : JSON.stringify(result.payload, null, 2);
+                  payloadDetails.dataset.loaded = 'true';
+                } catch (error) { payloadContent.textContent = `${error.message} Close and reopen to retry.`; }
+                finally { delete payloadDetails.dataset.loading; }
+              });
               const attemptDetails = document.createElement('details'); const attemptSummary = document.createElement('summary'); attemptSummary.textContent = 'Attempt history';
               const attemptContent = document.createElement('div'); attemptDetails.append(attemptSummary, attemptContent);
               attemptDetails.addEventListener('toggle', async () => {
@@ -247,7 +259,7 @@ async function loadWebhooks() {
                 try { await api(`/api/webhooks/${encodeURIComponent(webhook.id)}/deliveries/${encodeURIComponent(delivery.id)}/replay`, { method: 'POST', body: '{}' }); $('#webhook-status').textContent = 'Replay queued. Close and reopen delivery attempts to refresh.'; details.dataset.loaded = ''; }
                 catch (error) { $('#webhook-status').textContent = error.message; replay.disabled = false; }
               });
-              row.append(label, attemptDetails, replay); rows.append(row);
+              row.append(label, payloadDetails, attemptDetails, replay); rows.append(row);
             }
             cursor = page.data.at(-1)?.id || cursor; more.hidden = !page.has_more;
             if (!rows.children.length) { const empty = document.createElement('p'); empty.textContent = 'No delivery attempts yet.'; content.prepend(empty); }
