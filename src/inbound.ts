@@ -22,10 +22,22 @@ export async function receiveEmail(message: ForwardableEmailMessage, env: Inboun
 export async function readReceived(request: Request, env: InboundEnv): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === '/emails/receiving') {
-    const raw = url.searchParams.get('limit') ?? '20';
-    if ([...url.searchParams.keys()].some(key => key !== 'limit') || url.searchParams.getAll('limit').length > 1 || !/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) return response({ message: 'Invalid pagination' }, 400);
-    const rows = await env.DB.prepare('SELECT id, sender, recipient, subject, created_at FROM inbound_emails ORDER BY created_at DESC, id DESC LIMIT ?').bind(Number(raw) + 1).all();
-    return response({ object: 'list', data: rows.results.slice(0, Number(raw)), has_more: rows.results.length > Number(raw) });
+    const params = url.searchParams;
+    const raw = params.get('limit') ?? '20';
+    if ([...params.keys()].some(key => !['limit', 'before', 'after'].includes(key)) || ['limit', 'before', 'after'].some(key => params.getAll(key).length > 1) || !/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) return response({ message: 'Invalid pagination' }, 400);
+    const before = params.get('before'); const after = params.get('after');
+    if ((before !== null && after !== null) || before === '' || after === '') return response({ message: 'Invalid cursor' }, 400);
+    const cursor = before ?? after; let condition = ''; let values: string[] = [];
+    if (cursor !== null) {
+      const anchor = await env.DB.prepare('SELECT id, created_at FROM inbound_emails WHERE id = ?').bind(cursor).first<{ id: string; created_at: string }>();
+      if (!anchor) return response({ message: 'Invalid cursor' }, 400);
+      condition = before !== null ? 'WHERE (created_at, id) > (?, ?)' : 'WHERE (created_at, id) < (?, ?)';
+      values = [anchor.created_at, anchor.id];
+    }
+    const direction = before !== null ? 'ASC' : 'DESC'; const limit = Number(raw);
+    const rows = await env.DB.prepare(`SELECT id, sender, recipient, subject, created_at FROM inbound_emails ${condition} ORDER BY created_at ${direction}, id ${direction} LIMIT ?`).bind(...values, limit + 1).all();
+    const result = rows.results.slice(0, limit); if (before !== null) result.reverse();
+    return response({ object: 'list', data: result, has_more: rows.results.length > limit });
   }
   const match = url.pathname.match(/^\/emails\/receiving\/([0-9a-f-]{36})(?:\/attachments\/(\d+))?$/);
   if (!match) return response({ message: 'Not found' }, 404);
