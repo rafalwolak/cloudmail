@@ -47,12 +47,13 @@ export async function handleMcp(request: Request, env: KeyEnv & InboundEnv, acce
     }
   });
   server.registerTool('send_batch', {
-    description: 'Send 1-100 transactional emails. Confirm recipients and content before calling. A failed batch may have partially sent; inspect the response before retrying.',
-    inputSchema: z.object({ emails: z.array(emailSchema.omit({ idempotency_key: true, scheduled_at: true })).min(1).max(100), idempotency_key: z.string().min(1).max(256).optional() }).strict(),
+    description: 'Send 1-100 transactional emails. Confirm recipients and content before calling. Strict validation rejects the whole batch; permissive validation sends valid entries and reports errors by index. A failed batch may have partially sent; inspect the response before retrying.',
+    inputSchema: z.object({ emails: z.array(emailSchema.omit({ idempotency_key: true, scheduled_at: true })).min(1).max(100), idempotency_key: z.string().min(1).max(256).optional(), validation_mode: z.enum(['strict', 'permissive']).optional() }).strict(),
     annotations: { destructiveHint: false, readOnlyHint: false, idempotentHint: false, openWorldHint: true },
-  }, async ({ emails, idempotency_key }) => {
+  }, async ({ emails, idempotency_key, validation_mode }) => {
     const headers = new Headers({ 'content-type': 'application/json' });
     if (idempotency_key !== undefined) headers.set('Idempotency-Key', idempotency_key);
+    if (validation_mode !== undefined) headers.set('x-batch-validation', validation_mode);
     const response = await sendBatch(new Request(new URL('/emails/batch', env.BETTER_AUTH_URL), { method: 'POST', headers, body: JSON.stringify(emails) }), env, access.sending_domain);
     return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
   });

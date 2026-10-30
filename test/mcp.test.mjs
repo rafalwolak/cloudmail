@@ -48,6 +48,14 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     assert.deepEqual(JSON.parse(batchAgain.content[0].text), JSON.parse(batch.content[0].text));
     const invalidBatch = await client.callTool({ name: 'send_batch', arguments: { emails: [batchArgs.emails[0], { ...batchArgs.emails[1], to: [] }] } });
     assert.equal(invalidBatch.isError, true);
+    const permissiveArgs = { emails: [batchArgs.emails[0], { ...batchArgs.emails[1], to: [] }], validation_mode: 'permissive', idempotency_key: crypto.randomUUID() };
+    const permissive = await client.callTool({ name: 'send_batch', arguments: permissiveArgs });
+    assert.notEqual(permissive.isError, true);
+    const permissiveResult = JSON.parse(permissive.content[0].text);
+    assert.equal(permissiveResult.data.length, 1);
+    assert.equal(permissiveResult.errors[0].index, 1);
+    const permissiveRetry = await client.callTool({ name: 'send_batch', arguments: permissiveArgs });
+    assert.deepEqual(JSON.parse(permissiveRetry.content[0].text), permissiveResult);
     const idemArgs = { from: 'sender@example.com', to: 'recipient@example.com', subject: 'MCP idempotency', text: 'Hello', idempotency_key: crypto.randomUUID() };
     const first = await client.callTool({ name: 'send_email', arguments: idemArgs });
     const again = await client.callTool({ name: 'send_email', arguments: idemArgs });
