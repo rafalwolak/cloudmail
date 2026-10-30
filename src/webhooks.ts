@@ -57,7 +57,7 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
   const deliveryDetail = path.match(/^\/webhooks\/([0-9a-f-]{36})\/deliveries\/([0-9a-f]{32})$/);
   if (deliveryDetail && request.method === 'GET') {
     if ([...new URL(request.url).searchParams.keys()].length) return json({ message: 'Unsupported query parameter' }, 400);
-    const row = await env.DB.prepare('SELECT d.id, d.event_id, d.state, d.attempts, d.next_attempt, d.last_status, d.replay_of, d.payload, e.type, e.occurred_at FROM webhook_deliveries d JOIN delivery_events e ON e.id = d.event_id WHERE d.webhook_id = ? AND d.id = ?').bind(deliveryDetail[1], deliveryDetail[2]).first<{ payload: string | null } & Record<string, unknown>>();
+    const row = await env.DB.prepare("SELECT d.id, d.event_id, d.state, d.attempts, d.next_attempt, d.last_status, d.replay_of, d.payload, e.type, COALESCE(d.event_type, 'email.' || e.type) AS event_type, e.occurred_at FROM webhook_deliveries d JOIN delivery_events e ON e.id = d.event_id WHERE d.webhook_id = ? AND d.id = ?").bind(deliveryDetail[1], deliveryDetail[2]).first<{ payload: string | null } & Record<string, unknown>>();
     return row ? json({ object: 'webhook_delivery', ...row, payload: row.payload === null ? null : JSON.parse(row.payload) }) : json({ message: 'Not found' }, 404);
   }
   const attempts = path.match(/^\/webhooks\/([0-9a-f-]{36})\/deliveries\/([0-9a-f]{32})\/attempts$/);
@@ -82,7 +82,7 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
       condition = 'AND (e.occurred_at, d.id) < (?, ?)'; values = [anchor.occurred_at, anchor.id];
     }
     const limit = Number(raw);
-    const rows = await env.DB.prepare(`SELECT d.id, d.event_id, d.state, d.attempts, d.next_attempt, d.last_status, d.replay_of, e.type, e.occurred_at FROM webhook_deliveries d JOIN delivery_events e ON e.id = d.event_id WHERE d.webhook_id = ? ${condition} ORDER BY e.occurred_at DESC, d.id DESC LIMIT ?`).bind(deliveries[1], ...values, limit + 1).all();
+    const rows = await env.DB.prepare(`SELECT d.id, d.event_id, d.state, d.attempts, d.next_attempt, d.last_status, d.replay_of, e.type, COALESCE(d.event_type, 'email.' || e.type) AS event_type, e.occurred_at FROM webhook_deliveries d JOIN delivery_events e ON e.id = d.event_id WHERE d.webhook_id = ? ${condition} ORDER BY e.occurred_at DESC, d.id DESC LIMIT ?`).bind(deliveries[1], ...values, limit + 1).all();
     return json({ object: 'list', data: rows.results.slice(0, limit), has_more: rows.results.length > limit });
   }
   const match = path.match(/^\/webhooks\/([0-9a-f-]{36})$/);

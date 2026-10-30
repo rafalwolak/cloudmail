@@ -580,7 +580,7 @@ async function loadWebhooks() {
             const params = new URLSearchParams({ limit: '20' }); if (cursor) params.set('after', cursor);
             const page = await api(`/api/webhooks/${encodeURIComponent(webhook.id)}/deliveries?${params}`);
             for (const delivery of page.data) {
-              const row = document.createElement('li'); const label = document.createElement('span'); label.textContent = `${delivery.type} · ${delivery.state} · ${delivery.attempts} attempts${delivery.last_status ? ` · HTTP ${delivery.last_status}` : ''} · ${new Date(delivery.occurred_at).toLocaleString()}`;
+              const row = document.createElement('li'); const label = document.createElement('span'); label.textContent = `${delivery.event_type} · ${delivery.state} · ${delivery.attempts} attempts${delivery.last_status ? ` · HTTP ${delivery.last_status}` : ''} · ${new Date(delivery.occurred_at).toLocaleString()}`;
               const payloadDetails = document.createElement('details'); const payloadSummary = document.createElement('summary'); payloadSummary.textContent = 'Saved payload';
               const payloadContent = document.createElement('pre'); payloadContent.className = 'webhook-payload'; payloadDetails.append(payloadSummary, payloadContent);
               payloadDetails.addEventListener('toggle', async () => {
@@ -607,7 +607,7 @@ async function loadWebhooks() {
                 } catch (error) { attemptContent.textContent = `${error.message} Close and reopen to retry.`; }
                 finally { delete attemptDetails.dataset.loading; }
               });
-              const replay = document.createElement('button'); replay.type = 'button'; replay.className = 'text-button'; replay.textContent = 'Replay'; replay.setAttribute('aria-label', `Replay ${delivery.type} delivery ${delivery.id}`);
+              const replay = document.createElement('button'); replay.type = 'button'; replay.className = 'text-button'; replay.textContent = 'Replay'; replay.setAttribute('aria-label', `Replay ${delivery.event_type} delivery ${delivery.id}`);
               replay.addEventListener('click', async () => {
                 if (!window.confirm('Queue another delivery of this event? The existing retry schedule will continue.')) return;
                 replay.disabled = true;
