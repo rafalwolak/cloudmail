@@ -63,3 +63,20 @@ test('administrator can create and publish a template from dashboard API', { ski
   assert.equal((await detail.json()).status, 'published');
   assert.equal((await fetch(`${base}/api/templates/${id}`, { method: 'DELETE', headers })).status, 200);
 });
+
+test('dashboard schedule changes require an administrator and a trusted origin', { skip: !process.env.TEST_DASHBOARD_ADMIN }, async () => {
+  const auth = await fetch(`${base}/api/auth/sign-in/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ email: process.env.TEST_DASHBOARD_ADMIN, password: process.env.TEST_DASHBOARD_PASSWORD }) });
+  assert.equal(auth.status, 200);
+  const cookie = auth.headers.get('set-cookie').split(';')[0];
+  const scheduled_at = new Date(Date.now() + 60000).toISOString();
+  const created = await fetch(`${base}/emails`, { method: 'POST', headers: { authorization: `Bearer ${process.env.TEST_API_KEY || 'local-test-key'}`, 'content-type': 'application/json' }, body: JSON.stringify({ from: 'sender@example.com', to: 'recipient@example.com', subject: 'Dashboard schedule', text: 'Hi', scheduled_at }) });
+  assert.equal(created.status, 200);
+  const { id } = await created.json();
+  const path = `${base}/api/history/${id}`;
+  const later = new Date(Date.now() + 120000).toISOString();
+  assert.equal((await fetch(path, { method: 'PATCH', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ scheduled_at: later }) })).status, 401);
+  assert.equal((await fetch(path, { method: 'PATCH', headers: { cookie, 'content-type': 'application/json', origin: 'https://attacker.example' }, body: JSON.stringify({ scheduled_at: later }) })).status, 403);
+  assert.equal((await fetch(path, { method: 'PATCH', headers: { cookie, 'content-type': 'application/json', origin: base }, body: JSON.stringify({ scheduled_at: later }) })).status, 200);
+  assert.equal((await (await fetch(path, { headers: { cookie } })).json()).scheduled_at, later);
+  assert.equal((await fetch(`${path}/cancel`, { method: 'POST', headers: { cookie, origin: base } })).status, 200);
+});

@@ -81,7 +81,36 @@ async function loadHistory(reset = false) {
       } catch (error) { content.textContent = `${error.message} Close and reopen to retry.`; }
       finally { delete details.dataset.loading; }
     });
-    item.append(subject, detail, details); list.append(item);
+    item.append(subject, detail);
+    if (email.status === 'scheduled' && email.scheduled_at) {
+      const when = document.createElement('span');
+      when.textContent = `Scheduled for ${new Date(email.scheduled_at).toLocaleString()} (your time zone)`;
+      item.append(when);
+      const form = document.createElement('form'); form.className = 'schedule-form';
+      const label = document.createElement('label'); label.htmlFor = `schedule-${email.id}`; label.textContent = `New send time for ${email.subject}`;
+      const input = document.createElement('input'); input.id = label.htmlFor; input.type = 'datetime-local'; input.required = true;
+      const date = new Date(email.scheduled_at);
+      input.value = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      const save = document.createElement('button'); save.type = 'submit'; save.className = 'secondary'; save.textContent = 'Reschedule';
+      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'text-button'; cancel.textContent = 'Cancel scheduled email';
+      cancel.setAttribute('aria-label', `Cancel scheduled email ${email.subject}`);
+      form.append(label, input, save, cancel); item.append(form);
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const selected = new Date(input.value);
+        if (!Number.isFinite(selected.getTime()) || selected.getTime() <= Date.now()) { message.textContent = 'Choose a future send time.'; input.focus(); return; }
+        save.disabled = true; cancel.disabled = true;
+        try { await api(`/api/history/${encodeURIComponent(email.id)}`, { method: 'PATCH', body: JSON.stringify({ scheduled_at: selected.toISOString() }) }); await loadHistory(true); message.textContent = 'Send time updated.'; }
+        catch (error) { message.textContent = error.message; save.disabled = false; cancel.disabled = false; }
+      });
+      cancel.addEventListener('click', async () => {
+        if (!window.confirm(`Cancel scheduled email “${email.subject}”?`)) return;
+        save.disabled = true; cancel.disabled = true;
+        try { await api(`/api/history/${encodeURIComponent(email.id)}/cancel`, { method: 'POST', body: '{}' }); await loadHistory(true); message.textContent = 'Scheduled email canceled.'; }
+        catch (error) { message.textContent = error.message; save.disabled = false; cancel.disabled = false; }
+      });
+    }
+    item.append(details); list.append(item);
   }
   historyCursor = result.data.at(-1)?.id || null;
   $('#empty-history').hidden = list.children.length > 0;

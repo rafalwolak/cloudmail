@@ -30,11 +30,12 @@ export default {
       return createAuth(env).handler(request);
     }
     if (url.pathname === '/api/keys' || url.pathname.startsWith('/api/keys/')) return manageKeys(request, env);
-    if ((url.pathname === '/api/history' || url.pathname.startsWith('/api/history/')) && request.method === 'GET') {
+    if (url.pathname === '/api/history' || url.pathname.startsWith('/api/history/')) {
       const admin = await authorizeAdmin(request, env);
       if (admin instanceof Response) return admin;
+      if (request.method !== 'GET' && request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
       url.pathname = '/emails' + url.pathname.slice('/api/history'.length);
-      return readHistory(new Request(url), env);
+      return request.method === 'GET' ? readHistory(new Request(url), env) : manageSchedule(new Request(url, request), env);
     }
     if (url.pathname === '/api/templates' || url.pathname.startsWith('/api/templates/')) {
       const admin = await authorizeAdmin(request, env);
