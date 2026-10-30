@@ -67,7 +67,7 @@ export async function manageSchedule(request: Request, env: ScheduleEnv): Promis
     const existing = await env.DB.prepare('SELECT id FROM email_history WHERE id = ?').bind(id).first();
     return Response.json({ message: existing ? 'Email cannot be changed' : 'Not found' }, { status: existing ? 409 : 404 });
   }
-  return Response.json({ id });
+  return Response.json({ object: 'email', id });
 }
 
 export async function processScheduled(env: ScheduleEnv): Promise<void> {

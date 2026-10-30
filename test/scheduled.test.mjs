@@ -20,9 +20,13 @@ test('scheduled email can be rescheduled, canceled, and idempotently created', a
   assert.equal(stored.scheduled_at, scheduled_at);
   assert.ok(!JSON.stringify(stored).includes(message.text));
   const later = new Date(Date.now() + 120000).toISOString();
-  assert.equal((await call(`/emails/${id}`, 'PATCH', { scheduled_at: later })).status, 200);
+  const updated = await call(`/emails/${id}`, 'PATCH', { scheduled_at: later });
+  assert.equal(updated.status, 200);
+  assert.deepEqual(await updated.json(), { object: 'email', id });
   assert.equal((await (await call(`/emails/${id}`)).json()).scheduled_at, later);
-  assert.equal((await call(`/emails/${id}/cancel`, 'POST', {})).status, 200);
+  const canceled = await call(`/emails/${id}/cancel`, 'POST', {});
+  assert.equal(canceled.status, 200);
+  assert.deepEqual(await canceled.json(), { object: 'email', id });
   assert.equal((await (await call(`/emails/${id}`)).json()).status, 'canceled');
   assert.equal((await call(`/emails/${id}`, 'PATCH', { scheduled_at: later })).status, 409);
 });
