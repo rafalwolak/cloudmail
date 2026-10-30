@@ -647,9 +647,13 @@ $('#signup-form').addEventListener('submit', async (event) => {
 $('#verify-form').addEventListener('submit', async event => {
   event.preventDefault(); const button = event.currentTarget.querySelector('button[type="submit"]'); button.disabled = true;
   announce('Requesting verification link…');
+  let message = 'If verification is needed and email delivery is configured, check your inbox for a link.';
   try { await api('/api/auth/send-verification-email', { method: 'POST', body: JSON.stringify({ email: $('#verify-email').value.trim(), callbackURL: '/dashboard' }) }); }
-  catch { /* Do not expose account existence or delivery details. */ }
-  finally { button.disabled = false; announce('If verification is needed and email delivery is configured, check your inbox for a link.'); }
+  catch (error) {
+    // A network failure is independent of whether the account exists.
+    if (error instanceof TypeError) message = 'Could not reach Cloudmail. Check your connection and try again.';
+  }
+  finally { button.disabled = false; announce(message); }
 });
 $('#forgot-form').addEventListener('submit', async (event) => {
   event.preventDefault(); announce('Requesting recovery link…');
