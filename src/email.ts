@@ -54,8 +54,15 @@ export function parseEmail(value: unknown): OutboundEmail | string {
   if (email.headers !== undefined && (!email.headers || typeof email.headers !== 'object' || Array.isArray(email.headers) || !Object.values(email.headers).every(value => typeof value === 'string'))) return 'headers must contain string values';
   if (email.headers !== undefined) {
     const headers = email.headers as Record<string, string>;
-    if (Object.entries(headers).some(([name, value]) => !/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name) || /[\r\n]/.test(value))) return 'Invalid custom header name or value';
-    const bytes = new TextEncoder().encode(Object.entries(headers).map(([name, value]) => `${name}: ${value}\r\n`).join('')).byteLength;
+    const entries = Object.entries(headers); const encoder = new TextEncoder();
+    const names = new Set<string>(); let standardCount = 0;
+    for (const [name, value] of entries) {
+      const normalized = name.toLowerCase(); const custom = normalized.startsWith('x-');
+      if (names.has(normalized) || name.length > 100 || !(custom ? /^x-[a-z0-9_-]+$/i : /^[a-z0-9-]+$/i).test(name) || !value.length || /[\r\n]/.test(value) || encoder.encode(value).byteLength > 2048) return 'Invalid custom header name or value';
+      names.add(normalized); if (!custom) standardCount++;
+    }
+    if (standardCount > 20) return 'A maximum of 20 non-X custom headers is supported';
+    const bytes = encoder.encode(entries.map(([name, value]) => `${name}: ${value}\r\n`).join('')).byteLength;
     if (bytes > 16000) return 'Custom headers exceed 16 KB';
   }
   if (email.tags !== undefined && (!Array.isArray(email.tags) || email.tags.length > 100 || !email.tags.every(tag => tag && typeof tag === 'object' && !Array.isArray(tag) && Object.keys(tag).length === 2 && typeof tag.name === 'string' && /^[A-Za-z0-9_-]{1,256}$/.test(tag.name) && typeof tag.value === 'string' && /^[A-Za-z0-9_-]{1,256}$/.test(tag.value)))) return 'Invalid tags';
