@@ -11,7 +11,7 @@ An early-stage, self-hosted transactional email service on Cloudflare Workers. T
 - `GET /emails` and `GET /emails/{id}` expose a basic, authenticated history of send attempts. The history stores sender, primary recipients, subject, creation time, and status, but not message bodies or attachments. `accepted` means accepted by Cloudflare, not delivered. A `pending` or `unknown` status requires investigation before retrying. Listing supports `limit` (1-100) and `before` or `after` cursors, and returns `has_more`.
 - A stateless MCP endpoint at `/mcp` exposes `send_email`, `list_emails`, and `get_email` tools over Streamable HTTP, using the same bearer API key as `/emails`.
 - Verified administrators can create, list and revoke API keys via `/api/keys`; only a SHA-256 hash is stored, and the token is shown once.
-- Better Auth provides email/password authentication backed by D1; verification and password-reset messages use the same recorded Cloudmail sending path. Sign-up is disabled by default and requires a verified sending domain.
+- Better Auth provides email/password authentication backed by D1 and revokes existing sessions on password reset; verification and password-reset messages use the same recorded Cloudmail sending path. Sign-up is disabled by default and requires a verified sending domain.
 
 ## Deploy
 

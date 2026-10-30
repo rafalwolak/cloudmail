@@ -20,6 +20,7 @@ export function createAuth(env: AuthEnv) {
       enabled: true,
       disableSignUp: env.ENABLE_SIGNUP !== 'true' || !env.AUTH_EMAIL_FROM,
       requireEmailVerification: true,
+      revokeSessionsOnPasswordReset: true,
       sendResetPassword: async ({ user, url }) => {
         if (!env.AUTH_EMAIL_FROM) throw new Error('Authentication sender is not configured');
         await sendRecordedEmail(env, { from: env.AUTH_EMAIL_FROM, to: user.email, subject: 'Reset your Cloudmail password', text: `Reset your password using this link: ${url}` });
