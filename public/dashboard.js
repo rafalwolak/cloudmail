@@ -79,6 +79,25 @@ async function loadHistory(reset = false) {
     const item = document.createElement('li');
     const subject = document.createElement('strong'); subject.textContent = email.subject;
     const detail = document.createElement('span'); detail.textContent = `${email.to.join(', ')} · ${email.status} · ${new Date(email.created_at).toLocaleString()}`;
+    const recipients = document.createElement('details');
+    const recipientsSummary = document.createElement('summary'); recipientsSummary.textContent = 'Recipients and reply address';
+    const recipientsContent = document.createElement('div'); recipientsContent.className = 'delivery-events';
+    recipients.append(recipientsSummary, recipientsContent);
+    recipients.addEventListener('toggle', async () => {
+      if (!recipients.open || recipients.dataset.loaded || recipients.dataset.loading) return;
+      recipients.dataset.loading = 'true'; recipientsContent.textContent = 'Loading recipients…';
+      try {
+        const result = await api(`/api/history/${encodeURIComponent(email.id)}`);
+        recipientsContent.replaceChildren();
+        for (const [label, addresses] of [['Cc', result.cc], ['Bcc', result.bcc], ['Reply to', result.reply_to === null ? (result.cc === null ? null : []) : [result.reply_to]]]) {
+          const line = document.createElement('p');
+          line.textContent = `${label}: ${addresses === null ? 'Not recorded' : addresses.length ? addresses.join(', ') : 'None'}`;
+          recipientsContent.append(line);
+        }
+        recipients.dataset.loaded = 'true';
+      } catch (error) { recipientsContent.textContent = `${error.message} Close and reopen to retry.`; }
+      finally { delete recipients.dataset.loading; }
+    });
     const details = document.createElement('details');
     const summary = document.createElement('summary'); summary.textContent = 'Delivery events';
     const content = document.createElement('div'); content.className = 'delivery-events';
@@ -145,7 +164,7 @@ async function loadHistory(reset = false) {
         catch (error) { message.textContent = error.message; save.disabled = false; cancel.disabled = false; }
       });
     }
-    item.append(details); list.append(item);
+    item.append(recipients, details); list.append(item);
   }
   historyCursor = result.data.at(-1)?.id || null;
   $('#empty-history').hidden = list.children.length > 0;
