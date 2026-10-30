@@ -108,12 +108,15 @@ export async function handleMcp(request: Request, env: KeyEnv & InboundEnv, acce
   };
   server.registerTool('get_email_metrics', {
     description: 'Count accepted messages and unique message-recipient pairs for delivery events in a UTC interval. These counts use different units and do not establish delivery rates.',
-    inputSchema: z.object({ start_date: z.string().optional(), end_date: z.string().optional() }).strict(),
+    inputSchema: z.object({ start_date: z.string().optional(), end_date: z.string().optional(), metrics: z.array(z.enum(['sent', 'delivered', 'deferred', 'bounced', 'failed', 'rejected', 'complained'])).min(1).optional(), dimensions: z.array(z.enum(['period'])).max(1).optional(), granularity: z.enum(['hourly', 'daily']).optional() }).strict(),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, async ({ start_date, end_date }) => {
+  }, async ({ start_date, end_date, metrics, dimensions, granularity }) => {
     const params = new URLSearchParams();
     if (start_date !== undefined) params.set('start_date', start_date);
     if (end_date !== undefined) params.set('end_date', end_date);
+    if (metrics !== undefined) params.set('metrics', metrics.join(','));
+    if (dimensions?.length) params.set('dimensions', dimensions.join(','));
+    if (granularity !== undefined) params.set('granularity', granularity);
     const response = await readMetrics(new Request(new URL(`/emails/metrics?${params}`, env.BETTER_AUTH_URL)), env);
     return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
   });

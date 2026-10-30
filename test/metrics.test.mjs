@@ -22,10 +22,22 @@ test('metrics count distinct recipient events, respect intervals and are availab
     assert.equal(result.totals.delivered, 1);
     assert.equal(result.totals.bounced, 1);
     assert.equal(result.totals.complained, 0);
+    const grouped = await fetch(`${base}/emails/metrics?start_date=2031-01-01&end_date=2031-01-02&metrics=sent,delivered&dimensions=period&granularity=hourly`, { headers });
+    assert.equal(grouped.status, 200);
+    const groupedBody = await grouped.json();
+    assert.deepEqual(groupedBody.totals, { sent: 1, delivered: 1 });
+    assert.deepEqual(groupedBody.data, [
+      { period: '2031-01-01T01:00:00.000Z', sent: 1, delivered: 0 },
+      { period: '2031-01-01T02:00:00.000Z', sent: 0, delivered: 1 },
+      { period: '2031-01-01T03:00:00.000Z', sent: 0, delivered: 1 },
+      { period: '2031-01-01T04:00:00.000Z', sent: 0, delivered: 0 },
+    ]);
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers } }));
     const mcp = await client.callTool({ name: 'get_email_metrics', arguments: { start_date: '2031-01-01T00:00:00Z', end_date: '2031-01-02T00:00:00Z' } });
     assert.notEqual(mcp.isError, true);
     assert.deepEqual(JSON.parse(mcp.content[0].text), result);
+    const groupedMcp = await client.callTool({ name: 'get_email_metrics', arguments: { start_date: '2031-01-01', end_date: '2031-01-02', metrics: ['sent', 'delivered'], dimensions: ['period'], granularity: 'hourly' } });
+    assert.deepEqual(JSON.parse(groupedMcp.content[0].text), groupedBody);
   } finally {
     await client.close();
     sql(`DELETE FROM delivery_events WHERE provider_id = '${id}'; DELETE FROM email_history WHERE id = '${id}'`);
@@ -34,7 +46,7 @@ test('metrics count distinct recipient events, respect intervals and are availab
 
 test('metrics reject invalid intervals and require authorization', async () => {
   assert.equal((await fetch(`${base}/emails/metrics`)).status, 401);
-  for (const query of ['start_date=bad', 'start_date=2031-02-30T00:00:00Z', 'start_date=2031-01-02T00:00:00Z&end_date=2031-01-01T00:00:00Z', 'unknown=1']) {
+  for (const query of ['start_date=bad', 'start_date=2031-02-30T00:00:00Z', 'start_date=2031-01-02T00:00:00Z&end_date=2031-01-01T00:00:00Z', 'unknown=1', 'metrics=opened', 'dimensions=domain', 'granularity=weekly']) {
     assert.equal((await fetch(`${base}/emails/metrics?${query}`, { headers })).status, 400);
   }
 });
