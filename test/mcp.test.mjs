@@ -18,6 +18,7 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     await client.connect(transport);
     const tools = await client.listTools();
     assert.ok(tools.tools.some(tool => tool.name === 'send_email'));
+    assert.ok(tools.tools.some(tool => tool.name === 'send_batch'));
     assert.ok(tools.tools.some(tool => tool.name === 'list_emails'));
     assert.ok(tools.tools.some(tool => tool.name === 'get_email'));
     assert.ok(tools.tools.some(tool => tool.name === 'list_delivery_events'));
@@ -35,6 +36,13 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     assert.deepEqual(JSON.parse(retrieved.content[0].text).tags, [{ name: 'source', value: 'mcp' }]);
     const listed = await client.callTool({ name: 'list_emails', arguments: { limit: 100 } });
     assert.ok(JSON.parse(listed.content[0].text).data.some(item => item.id === id));
+    const batchArgs = { emails: [{ from: 'sender@example.com', to: 'recipient@example.com', subject: 'Batch', text: 'Hello' }, { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Second', text: 'Hello' }], idempotency_key: crypto.randomUUID() };
+    const batch = await client.callTool({ name: 'send_batch', arguments: batchArgs });
+    assert.notEqual(batch.isError, true);
+    const batchAgain = await client.callTool({ name: 'send_batch', arguments: batchArgs });
+    assert.deepEqual(JSON.parse(batchAgain.content[0].text), JSON.parse(batch.content[0].text));
+    const invalidBatch = await client.callTool({ name: 'send_batch', arguments: { emails: [batchArgs.emails[0], { ...batchArgs.emails[1], to: [] }] } });
+    assert.equal(invalidBatch.isError, true);
     const idemArgs = { from: 'sender@example.com', to: 'recipient@example.com', subject: 'MCP idempotency', text: 'Hello', idempotency_key: crypto.randomUUID() };
     const first = await client.callTool({ name: 'send_email', arguments: idemArgs });
     const again = await client.callTool({ name: 'send_email', arguments: idemArgs });

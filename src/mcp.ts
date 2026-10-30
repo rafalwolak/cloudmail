@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
 import { parseEmail } from './email';
+import { sendBatch } from './batch';
 import { handleTemplates, resolveTemplate } from './templates';
 import { manageSchedule, scheduleEmail, validateSchedule } from './scheduled';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
@@ -9,20 +10,22 @@ import type { AuthEnv } from './auth';
 
 const addresses = z.union([z.string(), z.array(z.string())]);
 
-export async function handleMcp(request: Request, env: AuthEnv, permission: 'full_access' | 'sending_access'): Promise<Response> {
-  const origin = request.headers.get('origin');
-  if (origin && origin !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
-  const server = new McpServer({ name: 'cloudmail', version: '0.1.0' });
-  server.registerTool('send_email', {
-    description: 'Send a transactional email. The sender domain must be configured in Cloudflare Email Service. Do not use for marketing email.',
-    inputSchema: z.object({
+const emailSchema = z.object({
       from: z.string().optional(), to: addresses, subject: z.string().optional(), text: z.string().optional(), html: z.string().optional(),
       cc: addresses.optional(), bcc: addresses.optional(), reply_to: z.string().optional(), headers: z.record(z.string(), z.string()).optional(),
       idempotency_key: z.string().min(1).max(256).optional(), scheduled_at: z.string().optional(),
       tags: z.array(z.object({ name: z.string(), value: z.string() }).strict()).max(100).optional(),
       template: z.object({ id: z.string(), variables: z.record(z.string(), z.union([z.string(), z.number()])).optional() }).strict().optional(),
       attachments: z.array(z.object({ filename: z.string(), content: z.string(), content_type: z.string().optional(), content_id: z.string().optional() }).strict()).optional(),
-    }).strict(),
+    }).strict();
+
+export async function handleMcp(request: Request, env: AuthEnv, permission: 'full_access' | 'sending_access'): Promise<Response> {
+  const origin = request.headers.get('origin');
+  if (origin && origin !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
+  const server = new McpServer({ name: 'cloudmail', version: '0.1.0' });
+  server.registerTool('send_email', {
+    description: 'Send a transactional email. The sender domain must be configured in Cloudflare Email Service. Do not use for marketing email.',
+    inputSchema: emailSchema,
     annotations: { destructiveHint: false, readOnlyHint: false, idempotentHint: false, openWorldHint: true },
   }, async args => {
     const { idempotency_key, scheduled_at, ...payload } = args;
@@ -39,6 +42,16 @@ export async function handleMcp(request: Request, env: AuthEnv, permission: 'ful
       if (error instanceof IdempotencyConflict) return { isError: true, content: [{ type: 'text', text: error.code }] };
       return { isError: true, content: [{ type: 'text', text: 'Email could not be confirmed. Check history before retrying; delivery may be uncertain.' }] };
     }
+  });
+  server.registerTool('send_batch', {
+    description: 'Send 1-100 transactional emails. Confirm recipients and content before calling. A failed batch may have partially sent; inspect the response before retrying.',
+    inputSchema: z.object({ emails: z.array(emailSchema.omit({ idempotency_key: true, scheduled_at: true })).min(1).max(100), idempotency_key: z.string().min(1).max(256).optional() }).strict(),
+    annotations: { destructiveHint: false, readOnlyHint: false, idempotentHint: false, openWorldHint: true },
+  }, async ({ emails, idempotency_key }) => {
+    const headers = new Headers({ 'content-type': 'application/json' });
+    if (idempotency_key !== undefined) headers.set('Idempotency-Key', idempotency_key);
+    const response = await sendBatch(new Request(new URL('/emails/batch', env.BETTER_AUTH_URL), { method: 'POST', headers, body: JSON.stringify(emails) }), env);
+    return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
   });
   if (permission === 'full_access') {
   const historyTool = async (path: string) => {

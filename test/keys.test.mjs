@@ -72,7 +72,9 @@ test('sending-only keys cannot read data or manage resources', { skip: !process.
     try {
       await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { authorization: `Bearer ${token}` } } }));
       const tools = await client.listTools();
-      assert.deepEqual(tools.tools.map(tool => tool.name), ['send_email']);
+      assert.deepEqual(tools.tools.map(tool => tool.name).sort(), ['send_batch', 'send_email']);
+      const batch = await client.callTool({ name: 'send_batch', arguments: { emails: [body] } });
+      assert.notEqual(batch.isError, true);
       const sent = await client.callTool({ name: 'send_email', arguments: body });
       assert.notEqual(sent.isError, true);
       for (const name of ['list_emails', 'get_email', 'create_template', 'cancel_email']) {
