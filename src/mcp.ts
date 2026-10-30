@@ -36,14 +36,14 @@ export async function handleMcp(request: Request, env: KeyEnv & InboundEnv & { C
   }, async args => {
     const { idempotency_key, scheduled_at, ...payload } = args;
     const scheduledAt = scheduled_at === undefined ? undefined : validateSchedule(scheduled_at);
-    if (scheduledAt === null) return { isError: true, content: [{ type: 'text', text: 'scheduled_at must be an ISO 8601 time within 30 days' }] };
+    if (scheduledAt === null) return { isError: true, content: [{ type: 'text', text: 'scheduled_at must be a future ISO 8601 time or relative duration within 30 days' }] };
     const resolved = await resolveTemplate(payload, env);
     if (typeof resolved === 'string') return { isError: true, content: [{ type: 'text', text: resolved }] };
     const email = parseEmail(resolved);
     if (typeof email === 'string') return { isError: true, content: [{ type: 'text', text: email }] };
     if (!allowedSender(email, access.sending_domain)) return { isError: true, content: [{ type: 'text', text: 'Sender is not permitted for this key' }] };
     try {
-      const result = scheduledAt ? await scheduleEmail(env, email, scheduledAt, idempotency_key) : await sendRecordedEmail(env, email, idempotency_key);
+      const result = scheduledAt ? await scheduleEmail(env, email, scheduledAt, idempotency_key, scheduled_at) : await sendRecordedEmail(env, email, idempotency_key);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       if (error instanceof IdempotencyConflict) return { isError: true, content: [{ type: 'text', text: error.code }] };

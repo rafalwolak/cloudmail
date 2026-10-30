@@ -5,17 +5,26 @@ import { cleanOrphanedScheduledPayloads } from './scheduled-cleanup';
 
 type ScheduleEnv = AuthEnv & { INBOUND: R2Bucket };
 
-export function validateSchedule(value: unknown): string | null {
-  if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d)$/.test(value)) return null;
-  const time = Date.parse(value);
-  if (!Number.isFinite(time) || time <= Date.now() || time > Date.now() + 30 * 86400000) return null;
+export function validateSchedule(value: unknown, now = Date.now()): string | null {
+  if (typeof value !== 'string') return null;
+  const relative = /^in ([1-9]\d*) (second|seconds|sec|secs|minute|minutes|min|mins|hour|hours|day|days)$/.exec(value);
+  let time: number;
+  if (relative) {
+    const unit = relative[2];
+    const multiplier = unit.startsWith('s') ? 1000 : unit.startsWith('m') ? 60000 : unit.startsWith('h') ? 3600000 : 86400000;
+    time = now + Number(relative[1]) * multiplier;
+  } else {
+    if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.test(value)) return null;
+    time = Date.parse(value);
+  }
+  if (!Number.isFinite(time) || time <= now || time > now + 30 * 86400000) return null;
   return new Date(time).toISOString();
 }
 
-export async function scheduleEmail(env: ScheduleEnv, email: OutboundEmail, scheduledAt: string, key?: string): Promise<{ id: string }> {
+export async function scheduleEmail(env: ScheduleEnv, email: OutboundEmail, scheduledAt: string, key?: string, requestedAt = scheduledAt): Promise<{ id: string }> {
   const id = crypto.randomUUID();
   const keyHash = key ? await digest(key) : null;
-  const requestHash = keyHash ? await digest(JSON.stringify({ email, scheduled_at: scheduledAt })) : null;
+  const requestHash = keyHash ? await digest(JSON.stringify({ email, scheduled_at: requestedAt.startsWith('in ') ? requestedAt : scheduledAt })) : null;
   if (keyHash) await env.DB.prepare('UPDATE email_history SET idempotency_key_hash = NULL WHERE idempotency_key_hash = ? AND created_at < ?').bind(keyHash, new Date(Date.now() - 86400000).toISOString()).run();
   const now = new Date().toISOString();
   const payload = JSON.stringify(email);
@@ -46,7 +55,7 @@ export async function manageSchedule(request: Request, env: ScheduleEnv): Promis
     let body: unknown; try { body = await request.json(); } catch { return Response.json({ message: 'Invalid JSON' }, { status: 400 }); }
     if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'scheduled_at')) return Response.json({ message: 'Invalid schedule' }, { status: 400 });
     const scheduledAt = validateSchedule((body as { scheduled_at?: unknown }).scheduled_at);
-    if (!scheduledAt) return Response.json({ message: 'scheduled_at must be an ISO 8601 time within 30 days' }, { status: 400 });
+    if (!scheduledAt) return Response.json({ message: 'scheduled_at must be a future ISO 8601 time or relative duration within 30 days' }, { status: 400 });
     result = await env.DB.prepare("UPDATE scheduled_emails SET scheduled_at = ? WHERE id = ? AND state = 'scheduled'").bind(scheduledAt, id).run();
   } else return Response.json({ message: 'Not found' }, { status: 404 });
   if (!result.meta.changes) {

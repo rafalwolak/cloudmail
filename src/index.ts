@@ -25,9 +25,12 @@ async function sendEmailRequest(request: Request, env: Env, sendingDomain: strin
   let data: unknown;
   try { data = await request.json(); } catch { return Response.json({ message: 'Invalid JSON' }, { status: 400 }); }
   let scheduledAt: string | undefined;
+  let requestedAt: string | undefined;
   if (data && typeof data === 'object' && !Array.isArray(data) && 'scheduled_at' in data) {
-    scheduledAt = validateSchedule((data as Record<string, unknown>).scheduled_at) ?? undefined;
-    if (!scheduledAt) return Response.json({ message: 'scheduled_at must be an ISO 8601 time within 30 days' }, { status: 400 });
+    const value = (data as Record<string, unknown>).scheduled_at;
+    scheduledAt = validateSchedule(value) ?? undefined;
+    if (typeof value === 'string') requestedAt = value;
+    if (!scheduledAt) return Response.json({ message: 'scheduled_at must be a future ISO 8601 time or relative duration within 30 days' }, { status: 400 });
     const { scheduled_at: _scheduledAt, ...rest } = data as Record<string, unknown>; data = rest;
   }
   const resolved = await resolveTemplate(data, env);
@@ -38,7 +41,7 @@ async function sendEmailRequest(request: Request, env: Env, sendingDomain: strin
   const idempotencyKey = request.headers.get('Idempotency-Key');
   if (idempotencyKey !== null && (idempotencyKey.length < 1 || idempotencyKey.length > 256)) return Response.json({ message: 'Idempotency-Key must be 1-256 characters', name: 'invalid_idempotency_key' }, { status: 400 });
   try {
-    const result = scheduledAt ? await scheduleEmail(env, email, scheduledAt, idempotencyKey ?? undefined) : await sendRecordedEmail(env, email, idempotencyKey ?? undefined);
+    const result = scheduledAt ? await scheduleEmail(env, email, scheduledAt, idempotencyKey ?? undefined, requestedAt) : await sendRecordedEmail(env, email, idempotencyKey ?? undefined);
     return Response.json(result);
   } catch (error) {
     if (error instanceof IdempotencyConflict) return Response.json({ message: error.code, name: error.code }, { status: 409 });

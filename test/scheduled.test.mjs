@@ -27,6 +27,20 @@ test('scheduled email can be rescheduled, canceled, and idempotently created', a
   assert.equal((await call(`/emails/${id}`, 'PATCH', { scheduled_at: later })).status, 409);
 });
 
+test('relative schedules preserve idempotency across retries', async () => {
+  const key = crypto.randomUUID();
+  const request = { ...message, scheduled_at: 'in 1 min' };
+  const first = await call('/emails', 'POST', request, { 'Idempotency-Key': key });
+  assert.equal(first.status, 200, await first.clone().text());
+  const result = await first.json();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const retry = await call('/emails', 'POST', request, { 'Idempotency-Key': key });
+  assert.equal(retry.status, 200, await retry.clone().text());
+  assert.deepEqual(await retry.json(), result);
+  assert.equal((await call('/emails', 'POST', { ...request, scheduled_at: 'in 2 min' }, { 'Idempotency-Key': key })).status, 409);
+  assert.equal((await call(`/emails/${result.id}/cancel`, 'POST')).status, 200);
+});
+
 test('invalid schedules and attempts to cancel sent emails are rejected', async () => {
   for (const scheduled_at of ['tomorrow', new Date(Date.now() - 60000).toISOString(), new Date(Date.now() + 31 * 86400000).toISOString()]) assert.equal((await call('/emails', 'POST', { ...message, scheduled_at })).status, 400);
   assert.equal((await call('/emails/missing/cancel', 'POST', {})).status, 404);
