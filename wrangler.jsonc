@@ -1,0 +1,8 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cloudmail",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-23",
+  "send_email": [{ "name": "EMAIL" }],
+  "observability": { "enabled": true }
+}
