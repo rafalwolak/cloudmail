@@ -97,6 +97,35 @@ test('history reports the latest recorded recipient event', { skip: !process.env
   const sql = `INSERT INTO delivery_events (id, provider_id, recipient, type, occurred_at) SELECT '${id}-1', provider_id, 'recipient@example.com', 'delivered', '2030-01-01T00:00:00Z' FROM email_history WHERE id = '${id}'; INSERT INTO delivery_events (id, provider_id, recipient, type, occurred_at) SELECT '${id}-2', provider_id, 'recipient@example.com', 'bounced', '2030-01-02T00:00:00Z' FROM email_history WHERE id = '${id}'`;
   execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--persist-to', process.env.TEST_D1_PERSIST, '--command', sql], { stdio: 'ignore' });
   assert.equal((await (await fetch(`${base}/emails/${id}`, { headers })).json()).last_event, 'bounced');
+  const bounced = await (await fetch(`${base}/emails?last_event=bounced&subject=Last%20event`, { headers })).json();
+  assert.ok(bounced.data.some(email => email.id === id));
+  const delivered = await (await fetch(`${base}/emails?last_event=delivered&subject=Last%20event`, { headers })).json();
+  assert.ok(delivered.data.every(email => email.id !== id));
   const list = await (await fetch(`${base}/emails?limit=100`, { headers })).json();
   assert.equal(list.data.find(item => item.id === id).last_event, 'bounced');
+});
+
+test('status filters combine with history search and work through MCP', async () => {
+  const subject = `Status-${crypto.randomUUID()}`;
+  const send = async scheduled => {
+    const response = await fetch(`${base}/emails`, { method: 'POST', headers, body: JSON.stringify({ from: 'sender@example.com', to: 'recipient@example.com', subject, text: 'Hello', ...(scheduled ? { scheduled_at: new Date(Date.now() + 120000).toISOString() } : {}) }) });
+    assert.equal(response.status, 200, await response.clone().text());
+    return (await response.json()).id;
+  };
+  const immediate = await send(false);
+  const scheduled = await send(true);
+  const query = `subject=${encodeURIComponent(subject)}`;
+  const list = async status => (await (await fetch(`${base}/emails?${query}&status=${status}`, { headers })).json()).data;
+  assert.deepEqual((await list('accepted')).map(item => item.id), [immediate]);
+  assert.deepEqual((await list('scheduled')).map(item => item.id), [scheduled]);
+  const client = new Client({ name: 'status-filter-test', version: '1.0.0' });
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers } }));
+    const result = await client.callTool({ name: 'list_emails', arguments: { subject, status: 'scheduled' } });
+    assert.deepEqual(JSON.parse(result.content[0].text).data.map(item => item.id), [scheduled]);
+  } finally { await client.close(); }
+  assert.equal((await fetch(`${base}/emails/${scheduled}/cancel`, { method: 'POST', headers })).status, 200);
+  assert.deepEqual((await list('canceled')).map(item => item.id), [scheduled]);
+  assert.equal((await fetch(`${base}/emails?status=delivered`, { headers })).status, 400);
+  assert.equal((await fetch(`${base}/emails?last_event=unknown`, { headers })).status, 400);
 });

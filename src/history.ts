@@ -88,7 +88,7 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
   const tables = 'email_history LEFT JOIN scheduled_emails ON scheduled_emails.id = email_history.id';
   if (url.pathname === '/emails') {
     const params = url.searchParams;
-    const allowed = ['limit', 'before', 'after', 'from', 'to', 'subject'];
+    const allowed = ['limit', 'before', 'after', 'from', 'to', 'subject', 'status', 'last_event'];
     if ([...params.keys()].some(key => !allowed.includes(key)) || allowed.some(key => params.getAll(key).length > 1)) return Response.json({ message: 'Unsupported or duplicate query parameter' }, { status: 400 });
     const raw = params.get('limit') ?? '20';
     if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) return Response.json({ message: 'limit must be between 1 and 100' }, { status: 400 });
@@ -104,6 +104,16 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
       if (!value.trim() || value.length > 256) return Response.json({ message: 'Invalid filter' }, { status: 400 });
       conditions.push(key === 'to' ? 'EXISTS (SELECT 1 FROM json_each(email_history.recipients) WHERE instr(lower(value), lower(?)) > 0)' : `instr(lower(${key === 'from' ? 'sender' : 'subject'}), lower(?)) > 0`);
       values.push(value.trim());
+    }
+    const status = params.get('status');
+    if (status !== null) {
+      if (!['pending', 'accepted', 'unknown', 'scheduled', 'sending', 'canceled'].includes(status)) return Response.json({ message: 'Invalid status filter' }, { status: 400 });
+      conditions.push('COALESCE(scheduled_emails.state, email_history.status) = ?'); values.push(status);
+    }
+    const lastEvent = params.get('last_event');
+    if (lastEvent !== null) {
+      if (!['delivered', 'deferred', 'bounced', 'failed', 'rejected', 'complained'].includes(lastEvent)) return Response.json({ message: 'Invalid event filter' }, { status: 400 });
+      conditions.push('(SELECT type FROM delivery_events WHERE provider_id = email_history.provider_id ORDER BY occurred_at DESC, id DESC LIMIT 1) = ?'); values.push(lastEvent);
     }
     if (cursor !== null) {
       const anchor = await env.DB.prepare('SELECT id, created_at FROM email_history WHERE id = ?').bind(cursor).first<{ id: string; created_at: string }>();
