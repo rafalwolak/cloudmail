@@ -25,6 +25,7 @@ function setSignedIn(session) {
   $('#key-value').textContent = '';
   if (session) { $('#account').textContent = `Signed in as ${session.user.email}`; if (cloudflareConnected) $('#cloudflare-status').textContent = 'Cloudflare connected. Choose zones to manage sending domains.'; }
   else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); $('#compose-status').textContent = ''; composeKey = null; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
+  if (!session) { inboxGeneration++; inboxFilters = {}; $('#inbox-filter').reset(); }
 }
 let cloudflarePage = 1;
 async function loadCloudflareStatus() {
@@ -524,11 +525,16 @@ $('#copy-webhook-secret').addEventListener('click', async () => {
   catch { $('#webhook-status').textContent = 'Could not copy. Select and copy the secret manually.'; }
 });
 let inboxCursor = null;
+let inboxFilters = {};
+let inboxGeneration = 0;
 async function loadInbox(reset = false) {
+  const generation = reset ? ++inboxGeneration : inboxGeneration;
   const message = $('#inbox-status'); message.textContent = 'Loading received email…';
   const params = new URLSearchParams({ limit: '20' });
+  for (const [key, value] of Object.entries(inboxFilters)) params.set(key, value);
   if (!reset && inboxCursor) params.set('after', inboxCursor);
   const result = await api(`/api/inbox?${params}`); const list = $('#inbox-list');
+  if (generation !== inboxGeneration) return;
   if (reset) list.replaceChildren();
   for (const email of result.data) {
     const item = document.createElement('li'); const title = document.createElement('strong'); title.textContent = email.subject || '(No subject)';
@@ -569,8 +575,18 @@ async function loadInbox(reset = false) {
     item.append(title, metadata, details, remove); list.append(item);
   }
   inboxCursor = result.data.at(-1)?.id || null; $('#inbox-more').hidden = !result.has_more;
+  $('#empty-inbox').textContent = Object.keys(inboxFilters).length ? 'No messages match these filters.' : 'No received email. Email Routing must be configured to receive messages.';
   $('#empty-inbox').hidden = list.children.length > 0; message.textContent = '';
 }
+$('#inbox-filter').addEventListener('submit', async event => {
+  event.preventDefault();
+  inboxFilters = Object.fromEntries([...new FormData(event.currentTarget)].map(([key, value]) => [key, value.trim()]).filter(([, value]) => value));
+  try { await loadInbox(true); } catch (error) { $('#inbox-status').textContent = error.message; }
+});
+$('#inbox-clear').addEventListener('click', async () => {
+  $('#inbox-filter').reset(); inboxFilters = {};
+  try { await loadInbox(true); } catch (error) { $('#inbox-status').textContent = error.message; }
+});
 $('#inbox-more').addEventListener('click', async () => {
   const button = $('#inbox-more'); button.disabled = true;
   try { await loadInbox(); } catch (error) { $('#inbox-status').textContent = error.message; }

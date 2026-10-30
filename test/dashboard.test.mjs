@@ -19,6 +19,8 @@ test('dashboard provides registration and password recovery forms', async () => 
   assert.match(html, /id="verify-form"/);
   assert.match(html, /<label[^>]+for="verify-email"/);
   assert.match(html, /id="reset-form"/);
+  for (const name of ['from', 'to', 'subject']) assert.match(html, new RegExp(`<label[^>]+for="inbox-${name}"`));
+  assert.match(html, /id="inbox-filter" role="search"/);
 });
 
 test('dashboard email history requires a session', async () => {
