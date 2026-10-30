@@ -28,7 +28,7 @@ export async function previewTemplate(request: Request, expectedToken: string): 
   if (values.length !== 1 || [...form.keys()].some(key => key !== 'html' && key !== 'token') || values[0].length > 200000) return Response.json({ message: 'Invalid preview content' }, { status: 400 });
   return new Response(values[0], { headers: {
     'content-type': 'text/html; charset=utf-8',
-    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox; base-uri 'none'; form-action 'none'; frame-ancestors 'self'",
+    'content-security-policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox; base-uri 'none'; form-action 'none'; frame-ancestors 'self'",
     'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
   } });
 }

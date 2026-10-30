@@ -10,6 +10,7 @@ test('preview retains inline HTML while enforcing a sandbox and disabling networ
   assert.equal(response.status, 200); assert.equal(await response.text(), html);
   assert.match(response.headers.get('content-security-policy'), /default-src 'none'/);
   assert.match(response.headers.get('content-security-policy'), /style-src 'unsafe-inline'/);
+  assert.match(response.headers.get('content-security-policy'), /img-src data:/);
   assert.match(response.headers.get('content-security-policy'), /sandbox/);
   assert.match(response.headers.get('content-security-policy'), /form-action 'none'/);
   assert.equal(response.headers.get('cache-control'), 'no-store');
