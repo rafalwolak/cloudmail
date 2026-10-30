@@ -33,9 +33,17 @@ export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idem
     return { id: existing.id };
   }
   if (retainContent) {
-    if (!env.INBOUND) throw new Error('Email content storage is unavailable');
-    await storeSentContent(env.INBOUND, id, email);
-    await env.DB.prepare('UPDATE email_history SET body_stored = 1 WHERE id = ?').bind(id).run();
+    try {
+      await storeSentContent(env.INBOUND, id, email);
+      await env.DB.prepare('UPDATE email_history SET body_stored = 1 WHERE id = ?').bind(id).run();
+    } catch (error) {
+      // No delivery was attempted. Only remove the object after D1 confirms the row is gone.
+      try {
+        const removed = await env.DB.prepare("DELETE FROM email_history WHERE id = ? AND status = 'pending'").bind(id).run();
+        if (removed.meta.changes) await env.INBOUND.delete(`sent/${id}`);
+      } catch { console.error('Could not clean up unsent email content'); }
+      throw error;
+    }
   }
   let result: { messageId: string };
   try {
