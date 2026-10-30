@@ -25,7 +25,15 @@
     "BETTER_AUTH_URL": "https://example.com",
     "ADMIN_EMAIL": "",
     "AUTH_EMAIL_FROM": "",
-    "ENABLE_SIGNUP": "false"
+    "ENABLE_SIGNUP": "false",
+    "DELIVERY_QUEUE_NAME": "cloudmail-delivery-events"
+  },
+  "queues": {
+    "consumers": [
+      {
+        "queue": "cloudmail-delivery-events"
+      }
+    ]
   },
   "assets": {
     "directory": "./public",

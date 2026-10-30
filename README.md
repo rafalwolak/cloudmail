@@ -48,7 +48,7 @@ The `skills/cloudmail` directory contains a reusable agent skill. Treat inbound 
 
 ## Optional Cloudflare delivery events
 
-Cloudflare Email Sending can publish per-recipient events to Queues. This integration is disabled by default. Create a dedicated queue and add the following to your own `wrangler.jsonc`, replacing both occurrences of the queue name:
+Cloudflare Email Sending can publish per-recipient events to Queues. The default deployment configuration declares a dedicated consumer queue. Deploy to Cloudflare can provision this queue; for a manual Wrangler deployment, create it before deploying. If you choose another queue name, update both occurrences in `wrangler.jsonc`:
 
 ```jsonc
 "queues": { "consumers": [{ "queue": "cloudmail-delivery-events" }] },
