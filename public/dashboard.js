@@ -237,6 +237,8 @@ function updateComposeMode() {
   $('#compose-manual').hidden = template;
   $('#compose-template-fields').hidden = !template;
   $('#compose-template').required = template;
+  $('#compose-from').required = !template; $('#compose-subject').required = !template;
+  $('#compose-default-help').hidden = !template;
 }
 $('#compose-mode').addEventListener('change', updateComposeMode);
 let composeTemplateCursor = null;
@@ -317,9 +319,17 @@ $('#compose-form').addEventListener('submit', async event => {
   if (files.length > 32 || files.reduce((sum, file) => sum + file.size, 0) > 5 * 1024 * 1024) { message.textContent = 'Use at most 32 files and 5 MiB of attachments. The complete message must also fit Cloudflare limits.'; return; }
   const scheduleInput = $('#compose-schedule'); const schedule = scheduleInput.value ? new Date(scheduleInput.value) : null;
   if (schedule && (!Number.isFinite(schedule.getTime()) || schedule.getTime() <= Date.now() || schedule.getTime() > Date.now() + 30 * 86400000)) { message.textContent = 'Choose a future time within the next 30 days.'; scheduleInput.focus(); return; }
-  const payload = { from: $('#compose-from').value.trim(), to, subject: $('#compose-subject').value, ...(useTemplate ? { template } : { ...(text && { text }), ...(html && { html }) }), ...(cc.length && { cc }), ...(bcc.length && { bcc }), ...($('#compose-reply').value.trim() && { reply_to: $('#compose-reply').value.trim() }), ...(schedule && { scheduled_at: schedule.toISOString() }) };
-  if (!window.confirm(`${schedule ? `Schedule this transactional email for ${schedule.toLocaleString()}?` : 'Send this transactional email now?'}\nTo: ${to.join(', ')}\nCc: ${cc.join(', ') || 'None'}\nBcc: ${bcc.join(', ') || 'None'}\nSubject: ${payload.subject}${useTemplate ? `\nPublished template: ${template.id}` : ''}`)) return;
-  composeKey ??= crypto.randomUUID(); fields.disabled = true; message.textContent = 'Sending…';
+  const sender = $('#compose-from').value.trim(); const subject = $('#compose-subject').value;
+  let payload = { ...(sender && { from: sender }), to, ...(subject && { subject }), ...(useTemplate ? { template } : { ...(text && { text }), ...(html && { html }) }), ...(cc.length && { cc }), ...(bcc.length && { bcc }), ...($('#compose-reply').value.trim() && { reply_to: $('#compose-reply').value.trim() }) };
+  fields.disabled = true;
+  if (useTemplate) {
+    message.textContent = 'Preparing published template…';
+    try { payload = await api('/api/send/prepare', { method: 'POST', body: JSON.stringify(payload) }); }
+    catch (error) { message.textContent = `${error.message} No email was sent.`; fields.disabled = false; return; }
+  }
+  if (schedule) payload.scheduled_at = schedule.toISOString();
+  if (!window.confirm(`${schedule ? `Schedule this transactional email for ${schedule.toLocaleString()}?` : 'Send this transactional email now?'}\nFrom: ${payload.from}\nTo: ${to.join(', ')}\nCc: ${cc.join(', ') || 'None'}\nBcc: ${bcc.join(', ') || 'None'}\nSubject: ${payload.subject}${useTemplate ? `\nPublished template: ${template.id}` : ''}`)) { fields.disabled = false; message.textContent = ''; return; }
+  composeKey ??= crypto.randomUUID(); message.textContent = 'Sending…';
   try {
     if (files.length) payload.attachments = await Promise.all(files.map(file => new Promise((resolve, reject) => {
       const reader = new FileReader(); reader.onerror = () => reject(new Error('Could not read attachment.')); reader.onload = () => resolve({ filename: file.name, content: String(reader.result).split(',')[1], content_type: file.type || 'application/octet-stream' }); reader.readAsDataURL(file);

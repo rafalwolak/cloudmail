@@ -81,6 +81,19 @@ export default {
       if (origin !== 'null' && origin !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
       return previewTemplate(request, token);
     }
+    if (url.pathname === '/api/send/prepare' && request.method === 'POST') {
+      const admin = await authorizeAdmin(request, env);
+      if (admin instanceof Response) return admin;
+      if (request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
+      let body: unknown;
+      try { body = await request.json(); } catch { return Response.json({ message: 'Invalid JSON' }, { status: 400 }); }
+      if (!body || typeof body !== 'object' || Array.isArray(body) || !('template' in body)) return Response.json({ message: 'A template is required' }, { status: 400 });
+      const resolved = await resolveTemplate(body, env);
+      if (typeof resolved === 'string') return Response.json({ message: resolved }, { status: 400 });
+      const email = parseEmail(resolved);
+      if (typeof email === 'string') return Response.json({ message: email }, { status: 400 });
+      return Response.json(resolved, { headers: { 'cache-control': 'no-store' } });
+    }
     if (url.pathname === '/api/send' && request.method === 'POST') {
       const admin = await authorizeAdmin(request, env);
       if (admin instanceof Response) return admin;

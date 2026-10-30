@@ -221,3 +221,26 @@ test('dashboard sends a published template with variables', { skip: !process.env
     assert.equal(detail.html, '<p>Hello &lt;Alex&gt;</p>');
   } finally { await fetch(`${base}/api/templates/${id}`, { method: 'DELETE', headers }); }
 });
+
+test('dashboard prepares the published template snapshot before sending', { skip: !process.env.TEST_DASHBOARD_ADMIN }, async () => {
+  const auth = await fetch(`${base}/api/auth/sign-in/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ email: process.env.TEST_DASHBOARD_ADMIN, password: process.env.TEST_DASHBOARD_PASSWORD }) });
+  assert.equal(auth.status, 200); const cookie = auth.headers.get('set-cookie').split(';')[0];
+  const headers = { cookie, origin: base, 'content-type': 'application/json' };
+  const create = await fetch(`${base}/api/templates`, { method: 'POST', headers, body: JSON.stringify({ name: 'Prepare test', from: 'sender@example.com', subject: 'Hello {{{NAME}}}', html: '<p>Hello {{{NAME}}}</p>', variables: [{ key: 'NAME', type: 'string' }] }) });
+  const { id } = await create.json();
+  try {
+    assert.equal((await fetch(`${base}/api/templates/${id}/publish`, { method: 'POST', headers })).status, 200);
+    assert.equal((await fetch(`${base}/api/templates/${id}`, { method: 'PATCH', headers, body: JSON.stringify({ subject: 'Unpublished' }) })).status, 200);
+    const input = { to: ['recipient@example.com'], template: { id, variables: { NAME: 'Alex' } } };
+    const prepare = (origin, body = input) => fetch(`${base}/api/send/prepare`, { method: 'POST', headers: { ...headers, origin }, body: JSON.stringify(body) });
+    assert.equal((await prepare('https://attacker.example')).status, 403);
+    const response = await prepare(base); assert.equal(response.status, 200, await response.clone().text());
+    assert.equal(response.headers.get('cache-control'), 'no-store'); const snapshot = await response.json();
+    assert.equal(snapshot.from, 'sender@example.com'); assert.equal(snapshot.subject, 'Hello Alex'); assert.equal(snapshot.html, '<p>Hello Alex</p>');
+    assert.equal((await prepare(base, { to: input.to, template: { id, variables: {} } })).status, 400);
+    const sent = await fetch(`${base}/api/send`, { method: 'POST', headers, body: JSON.stringify(snapshot) });
+    assert.equal(sent.status, 200, await sent.clone().text());
+    const detail = await (await fetch(`${base}/api/history/${(await sent.json()).id}`, { headers: { cookie } })).json();
+    assert.equal(detail.subject, snapshot.subject); assert.equal(detail.html, snapshot.html);
+  } finally { await fetch(`${base}/api/templates/${id}`, { method: 'DELETE', headers }); }
+});
