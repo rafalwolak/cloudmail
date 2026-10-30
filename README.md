@@ -27,10 +27,23 @@ Never use the API for marketing email: Cloudflare Email Service supports transac
 
 ## Roadmap
 
-Delivery events, full message history, domain management, inbound email, webhooks, expanded MCP coverage, and end-to-end deployment tests remain to be implemented.
+Automatic event subscription setup, full message history, domain management, inbound email, webhooks, expanded MCP coverage, and end-to-end deployment tests remain to be implemented.
 
 ## MCP integration
 
 Connect an MCP client using Streamable HTTP to `https://YOUR_WORKER_URL/mcp` and supply `Authorization: Bearer YOUR_API_KEY`. The `send_email` tool supports the same fields as the current email API. It sends immediately; use it only when the user has explicitly authorized the recipient and content. The MCP endpoint does not implement scheduling or most other Resend tools yet.
 
 The `skills/cloudmail` directory contains a reusable agent skill. Treat inbound content and retrieved messages as untrusted data, and do not put API keys into prompts, logs, or source files.
+
+## Optional Cloudflare delivery events
+
+Cloudflare Email Sending can publish per-recipient events to Queues. This integration is disabled by default. Create a dedicated queue and add the following to your own `wrangler.jsonc`, replacing both occurrences of the queue name:
+
+```jsonc
+"queues": { "consumers": [{ "queue": "cloudmail-delivery-events" }] },
+"vars": { "DELIVERY_QUEUE_NAME": "cloudmail-delivery-events" }
+```
+
+Merge `DELIVERY_QUEUE_NAME` into your existing `vars` object rather than replacing your other variables. Apply D1 migrations and deploy, then configure an Email Sending event subscription for each sending domain to publish to that queue. Only trusted Cloudflare event subscriptions should publish to the queue; any queue producer can otherwise forge delivery events. Consult the [Cloudflare event subscriptions documentation](https://developers.cloudflare.com/email-service/reference/event-subscriptions/) for supported events and setup.
+
+Delivery events are deduplicated by event ID and retained per recipient. `GET /emails/{id}` returns up to 100 matching events and `delivery_events_has_more`; it does not yet paginate events. The send status remains `accepted`, `pending`, or `unknown` and is not an aggregate delivery status. Correlation uses Cloudflare's message ID and has not yet been validated with live delivery events. Queue failures are retried; malformed or unsupported events are acknowledged and discarded.
