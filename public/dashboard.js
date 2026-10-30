@@ -7,7 +7,7 @@ async function api(path, options = {}) {
   if (!response.ok) throw new Error(body?.message || 'Request failed. Please try again.');
   return body;
 }
-const views = ['login', 'signup', 'forgot', 'reset', 'dashboard'];
+const views = ['login', 'signup', 'verify', 'forgot', 'reset', 'dashboard'];
 function showView(view) {
   for (const name of views) $(`#${name}-view`).hidden = name !== view;
 }
@@ -585,6 +585,13 @@ $('#signup-form').addEventListener('submit', async (event) => {
     $('#signup-password').value = ''; showView('login');
     announce('If registration is available, check your email for a verification link.');
   } catch (error) { announce(error.message); }
+});
+$('#verify-form').addEventListener('submit', async event => {
+  event.preventDefault(); const button = event.currentTarget.querySelector('button[type="submit"]'); button.disabled = true;
+  announce('Requesting verification link…');
+  try { await api('/api/auth/send-verification-email', { method: 'POST', body: JSON.stringify({ email: $('#verify-email').value.trim(), callbackURL: '/dashboard' }) }); }
+  catch { /* Do not expose account existence or delivery details. */ }
+  finally { button.disabled = false; announce('If verification is needed and email delivery is configured, check your inbox for a link.'); }
 });
 $('#forgot-form').addEventListener('submit', async (event) => {
   event.preventDefault(); announce('Requesting recovery link…');

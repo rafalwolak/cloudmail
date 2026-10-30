@@ -33,4 +33,11 @@ test('an unverified user cannot sign in after registration', { skip: process.env
     method: 'POST', headers, body: JSON.stringify({ email, password }),
   });
   assert.equal(signin.status, 403, await signin.clone().text());
+  const resend = address => fetch(`${base}/api/auth/send-verification-email`, { method: 'POST', headers, body: JSON.stringify({ email: address, callbackURL: '/dashboard' }) });
+  const existing = await resend(email);
+  const missing = await resend(`missing-${crypto.randomUUID()}@example.com`);
+  assert.equal(existing.status, missing.status);
+  assert.deepEqual(await existing.json(), await missing.json());
+  const updatedHistory = await (await fetch(`${base}/emails?limit=100`, { headers: { authorization: `Bearer ${process.env.TEST_API_KEY || 'local-test-key'}` } })).json();
+  assert.ok(updatedHistory.data.filter(item => item.to.includes(email) && item.subject === 'Verify your Cloudmail email').length >= 2);
 });

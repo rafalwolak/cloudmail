@@ -16,6 +16,8 @@ test('dashboard provides registration and password recovery forms', async () => 
   const html = await response.text();
   assert.match(html, /id="signup-form"/);
   assert.match(html, /id="forgot-form"/);
+  assert.match(html, /id="verify-form"/);
+  assert.match(html, /<label[^>]+for="verify-email"/);
   assert.match(html, /id="reset-form"/);
 });
 
