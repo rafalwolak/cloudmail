@@ -1,6 +1,6 @@
 import { checkSelectedDomainDns } from './cloudflare-dns-diagnostics';
 import { createAuth, type AuthEnv } from './auth';
-import { authenticationConfigured, configuredMailbox } from './auth-config';
+import { authenticationConfigured, authenticationOriginMatches, configuredMailbox } from './auth-config';
 import { allowedSender, parseEmail } from './email';
 import { handleMcp } from './mcp';
 import { manageWebhooks, processWebhooks } from './webhooks';
@@ -63,7 +63,7 @@ export default {
     if (url.pathname === '/api/setup' && request.method === 'GET') {
       const authentication = authenticationConfigured(env);
       const sender = configuredMailbox(env.AUTH_EMAIL_FROM);
-      return Response.json({ authentication_configured: authentication, sender_configured: sender, registration_enabled: authentication && sender && env.ENABLE_SIGNUP === 'true', administrator_configured: configuredMailbox(env.ADMIN_EMAIL), sending_domain_status: 'unknown' }, { headers: { 'cache-control': 'no-store' } });
+      return Response.json({ authentication_configured: authentication, authentication_origin_matches: authentication && authenticationOriginMatches(env.BETTER_AUTH_URL, url.origin), sender_configured: sender, registration_enabled: authentication && sender && env.ENABLE_SIGNUP === 'true', administrator_configured: configuredMailbox(env.ADMIN_EMAIL), sending_domain_status: 'unknown' }, { headers: { 'cache-control': 'no-store' } });
     }
     if (url.pathname.startsWith('/api/auth/')) {
       if (!authenticationConfigured(env)) return Response.json({ message: 'Authentication is not configured' }, { status: 503 });

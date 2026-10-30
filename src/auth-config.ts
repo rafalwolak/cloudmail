@@ -12,3 +12,7 @@ export function authenticationConfigured(env: Pick<AuthEnv, 'BETTER_AUTH_SECRET'
 export function configuredMailbox(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 254 && /^[^\s@<>]+@[^\s@<>.]+(?:\.[^\s@<>.]+)+$/.test(value);
 }
+
+export function authenticationOriginMatches(configuredUrl: string, requestOrigin: string): boolean {
+  try { return new URL(configuredUrl).origin === requestOrigin; } catch { return false; }
+}

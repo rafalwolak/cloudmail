@@ -725,6 +725,7 @@ async function showSetup() {
   const setup = await api('/api/setup');
   const missing = [];
   if (!setup.authentication_configured) missing.push('Configure the authentication URL and secret.');
+  else if (!setup.authentication_origin_matches) missing.push('Open the dashboard at the configured authentication URL, or update BETTER_AUTH_URL to match this address.');
   if (!setup.sender_configured) missing.push('Configure the authentication sender address.');
   if (!setup.administrator_configured) missing.push('Configure the administrator email address.');
   if (!setup.registration_enabled) missing.push('Enable registration when your sender is ready.');
