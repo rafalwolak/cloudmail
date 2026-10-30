@@ -20,14 +20,11 @@ export async function scheduleEmail(env: ScheduleEnv, email: OutboundEmail, sche
   const payload = JSON.stringify(email);
   const objectKey = new TextEncoder().encode(payload).byteLength > 1500000 ? `scheduled/${id}` : null;
   if (objectKey) await env.INBOUND.put(objectKey, payload);
-  let results: D1Result[];
-  try { results = await env.DB.batch([
+  // A failed response can follow a committed transaction; keep the payload for investigation.
+  const results = await env.DB.batch([
     env.DB.prepare("INSERT INTO email_history (id, sender, recipients, subject, status, created_at, idempotency_key_hash, request_hash, tags, cc, bcc, reply_to) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(idempotency_key_hash) DO NOTHING").bind(id, email.from, JSON.stringify(Array.isArray(email.to) ? email.to : [email.to]), email.subject, now, keyHash, requestHash, JSON.stringify(email.tags ?? []), serializeRecipients(email.cc), serializeRecipients(email.bcc), email.replyTo ?? null),
     env.DB.prepare("INSERT INTO scheduled_emails (id, scheduled_at, state, payload, payload_r2_key) SELECT id, ?, 'scheduled', ?, ? FROM email_history WHERE id = ?").bind(scheduledAt, objectKey ? null : payload, objectKey, id),
-  ]); } catch (error) {
-    if (objectKey) try { await env.INBOUND.delete(objectKey); } catch { console.error('Could not remove scheduled payload after database failure'); }
-    throw error;
-  }
+  ]);
   if (!results[0].meta.changes) {
     if (objectKey) try { await env.INBOUND.delete(objectKey); } catch { console.error('Could not remove duplicate scheduled payload'); }
     const existing = await env.DB.prepare('SELECT id, request_hash FROM email_history WHERE idempotency_key_hash = ?').bind(keyHash).first<{ id: string; request_hash: string }>();
