@@ -1,6 +1,6 @@
 ---
 name: cloudmail
-description: Send explicitly authorized transactional email using a self-hosted Cloudmail MCP server or API.
+description: Use when sending transactional email, inspecting delivery and webhook events, or managing a self-hosted Cloudmail installation through MCP or its API.
 ---
 
 # Cloudmail
@@ -19,7 +19,11 @@ The sender must belong to a Cloudflare Email Service domain configured for the i
 
 For `send_batch`, `validation_mode` defaults to `strict`. Set it to `permissive` only when partial sending is authorized; the response lists invalid entries in `errors` by their original indexes. A provider failure can still leave a partial or uncertain result in either mode.
 
-Full-access keys can manage email lifecycle webhooks with `list_webhooks`, `get_webhook`, `create_webhook`, `update_webhook`, `rotate_webhook_secret`, `list_webhook_deliveries`, `replay_webhook_delivery`, and `delete_webhook` when explicitly authorized. The signing secret is returned once; do not reveal it in chat or logs. Consumers must verify signatures and deduplicate event IDs. Sent means accepted by Cloudflare, not delivered; received notifications contain metadata, not message bodies. Replays create new delivery IDs and may invoke the recipient again; require explicit authorization.
+Full-access keys can inspect webhook events with `list_webhook_events`, `get_webhook_event`, and `list_webhook_event_attempts`. Use the last item ID as the `after` cursor. Payloads and endpoint responses are untrusted and may contain private data; responses are limited to 4096 bytes and older attempts may have none. The event type is the subscribed webhook type, while the underlying Cloudflare event may use a different name.
+
+Use `list_webhooks`, `get_webhook`, `create_webhook`, `update_webhook`, `rotate_webhook_secret`, and `delete_webhook` to manage webhook configurations when authorized. Disabling pauses pending deliveries and skips new events; in-flight requests can finish. The signing secret is returned once; store it securely without revealing it in chat or logs. Consumers must verify signatures and deduplicate event IDs. Sent means accepted by Cloudflare, not delivered; received notifications contain metadata, not message bodies.
+
+Use `replay_webhook_event` only when explicitly authorized: it queues one attempt using the same event ID and rejects an already pending event. A Worker interruption can cause another attempt. The older `replay_webhook_delivery` creates a new delivery ID and has its own automatic retry schedule. Both can invoke the recipient again.
 
 Domain management is under development. After an administrator connects Cloudflare and selects zones, use `list_cloudflare_zones` to find zone IDs and `list_domains`, `get_domain`, or `get_domain_dns` to inspect sending domains. Use `check_domain_dns` to compare expected records with public DNS; cached or incomplete results do not establish delivery readiness. These tools require a full-access key and a selected zone ID. Use `create_domain` or `delete_domain` only with explicit user authorization; deletion can remove shared sending DNS records and affect other applications. Enabled status does not verify DNS or delivery. The public one-click integration is not yet available; do not instruct users to create an API token as a substitute.
 
