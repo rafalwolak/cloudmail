@@ -1,7 +1,7 @@
 import { createAuth, type AuthEnv } from './auth';
 import { allowedSender, parseEmail } from './email';
 import { handleMcp } from './mcp';
-import { receiveEmail, readReceived, type InboundEnv } from './inbound';
+import { deleteReceived, receiveEmail, readReceived, type InboundEnv } from './inbound';
 import { sendBatch } from './batch';
 import { manageSchedule, processScheduled, scheduleEmail, validateSchedule } from './scheduled';
 import { handleTemplates, resolveTemplate } from './templates';
@@ -35,6 +35,10 @@ export default {
     if (url.pathname === '/api/inbox' || url.pathname.startsWith('/api/inbox/')) {
       const admin = await authorizeAdmin(request, env);
       if (admin instanceof Response) return admin;
+      if (request.method === 'DELETE') {
+        if (request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
+        return deleteReceived(url.pathname.slice('/api/inbox/'.length), env);
+      }
       if (request.method !== 'GET') return Response.json({ message: 'Not found' }, { status: 404 });
       url.pathname = '/emails/receiving' + url.pathname.slice('/api/inbox'.length);
       return readReceived(new Request(url), env);
@@ -64,7 +68,7 @@ export default {
       return new Response(response.body, { status: response.status, headers });
     }
     if (url.pathname === '/' && request.method === 'GET') return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'", 'x-content-type-options': 'nosniff' } });
-    if (url.pathname !== '/mcp' && !(url.pathname === '/api-keys' || url.pathname.startsWith('/api-keys/')) && !(url.pathname === '/templates' || url.pathname.startsWith('/templates/')) && !(url.pathname === '/emails/batch' && request.method === 'POST') && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && ['GET', 'PATCH', 'POST'].includes(request.method))) return Response.json({ message: 'Not found' }, { status: 404 });
+    if (url.pathname !== '/mcp' && !(url.pathname === '/api-keys' || url.pathname.startsWith('/api-keys/')) && !(url.pathname === '/templates' || url.pathname.startsWith('/templates/')) && !(url.pathname === '/emails/batch' && request.method === 'POST') && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && ['GET', 'PATCH', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/receiving/') && request.method === 'DELETE')) return Response.json({ message: 'Not found' }, { status: 404 });
     const authorization = request.headers.get('Authorization') || '';
     const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
     const access = env.API_KEY && token === env.API_KEY ? { permission: 'full_access' as const, sending_domain: null } : await keyPermission(env.DB, token, env.ADMIN_EMAIL);
@@ -78,6 +82,7 @@ export default {
     }
     if (url.pathname === '/templates' || url.pathname.startsWith('/templates/')) return handleTemplates(request, env);
     if (url.pathname === '/emails/batch' && request.method === 'POST') return sendBatch(request, env, access.sending_domain);
+    if (request.method === 'DELETE' && url.pathname.startsWith('/emails/receiving/')) return deleteReceived(url.pathname.slice('/emails/receiving/'.length), env);
     if (request.method === 'GET' && (url.pathname === '/emails/receiving' || url.pathname.startsWith('/emails/receiving/'))) return readReceived(request, env);
     if (request.method === 'GET') return readHistory(request, env);
     if (url.pathname.startsWith('/emails/')) return manageSchedule(request, env);

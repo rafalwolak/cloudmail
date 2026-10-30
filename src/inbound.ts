@@ -54,3 +54,13 @@ export async function readReceived(request: Request, env: InboundEnv): Promise<R
   }
   return response({ id: row.id, from: row.sender, to: row.recipient, subject: parsed.subject ?? row.subject, created_at: row.created_at, text: parsed.text ?? null, html: parsed.html ?? null, message_id: parsed.messageId ?? null, attachments: parsed.attachments.map((attachment, index) => ({ id: String(index), filename: attachment.filename, content_type: attachment.mimeType, size: bytes(attachment.content).byteLength })) });
 }
+
+export async function deleteReceived(id: string, env: InboundEnv): Promise<Response> {
+  if (!/^[0-9a-f-]{36}$/.test(id)) return response({ message: 'Not found' }, 404);
+  const row = await env.DB.prepare('SELECT object_key FROM inbound_emails WHERE id = ?').bind(id).first<{ object_key: string }>();
+  if (!row) return response({ message: 'Not found' }, 404);
+  // Delete content first so a storage failure leaves a record that can be retried.
+  await env.INBOUND.delete(row.object_key);
+  await env.DB.prepare('DELETE FROM inbound_emails WHERE id = ?').bind(id).run();
+  return response({ id, deleted: true });
+}

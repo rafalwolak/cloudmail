@@ -90,4 +90,8 @@ test('dashboard inbox requires an administrator session', { skip: !process.env.T
   assert.equal(list.status, 200); assert.equal(list.headers.get('cache-control'), 'no-store');
   assert.ok(Array.isArray((await list.json()).data));
   assert.equal((await fetch(`${base}/api/inbox/missing`, { headers: { cookie } })).status, 404);
+  const path = `${base}/api/inbox/00000000-0000-0000-0000-000000000000`;
+  assert.equal((await fetch(path, { method: 'DELETE' })).status, 401);
+  assert.equal((await fetch(path, { method: 'DELETE', headers: { cookie, origin: 'https://attacker.example' } })).status, 403);
+  assert.equal((await fetch(path, { method: 'DELETE', headers: { cookie, origin: base } })).status, 404);
 });

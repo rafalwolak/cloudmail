@@ -168,7 +168,15 @@ async function loadInbox(reset = false) {
       } catch (error) { content.textContent = `${error.message} Close and reopen to retry.`; }
       finally { delete details.dataset.loading; }
     });
-    item.append(title, metadata, details); list.append(item);
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'text-button'; remove.textContent = 'Delete message';
+    remove.setAttribute('aria-label', `Delete received message ${email.subject || '(No subject)'}`);
+    remove.addEventListener('click', async () => {
+      if (!window.confirm('Permanently delete this message and its attachments?')) return;
+      remove.disabled = true;
+      try { await api(`/api/inbox/${encodeURIComponent(email.id)}`, { method: 'DELETE' }); await loadInbox(true); message.textContent = 'Message deleted.'; }
+      catch (error) { message.textContent = error.message; remove.disabled = false; }
+    });
+    item.append(title, metadata, details, remove); list.append(item);
   }
   inboxCursor = result.data.at(-1)?.id || null; $('#inbox-more').hidden = !result.has_more;
   $('#empty-inbox').hidden = list.children.length > 0; message.textContent = '';

@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { receiveEmail, readReceived } from '../src/inbound.ts';
+import { receiveEmail, readReceived, deleteReceived } from '../src/inbound.ts';
 const raw = 'From: sender@example.com\r\nTo: inbox@example.com\r\nSubject: Hello\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello inbox';
 function fixture() {
   const objects = new Map(); const rows = new Map();
-  const env = { INBOUND_ENABLED: 'true', INBOUND_ADDRESSES: 'inbox@example.com', INBOUND: { async put(key, stream) { objects.set(key, await new Response(stream).arrayBuffer()); }, async get(key) { const value = objects.get(key); return value ? { arrayBuffer: async () => value } : null; }, async delete(key) { objects.delete(key); } }, DB: { prepare(sql) { return { bind(...args) { return { async run() { rows.set(args[0], { id: args[0], sender: args[1], recipient: args[2], subject: args[3], created_at: args[4], object_key: args[5] }); }, async first() { return rows.get(args[0]) || null; } }; } }; } } };
+  const env = { INBOUND_ENABLED: 'true', INBOUND_ADDRESSES: 'inbox@example.com', INBOUND: { async put(key, stream) { objects.set(key, await new Response(stream).arrayBuffer()); }, async get(key) { const value = objects.get(key); return value ? { arrayBuffer: async () => value } : null; }, async delete(key) { objects.delete(key); } }, DB: { prepare(sql) { return { bind(...args) { return { async run() { if (sql.startsWith('DELETE')) { rows.delete(args[0]); return { meta: { changes: 1 } }; } rows.set(args[0], { id: args[0], sender: args[1], recipient: args[2], subject: args[3], created_at: args[4], object_key: args[5] }); }, async first() { return rows.get(args[0]) || null; } }; } }; } } };
   const message = { from: 'sender@example.com', to: 'inbox@example.com', headers: new Headers({ subject: 'Hello' }), rawSize: new TextEncoder().encode(raw).length, raw: new Blob([raw]).stream(), setReject(reason) { this.rejected = reason; } };
   return { env, message, rows, objects };
 }
@@ -43,4 +43,18 @@ test('returns attachments as downloads with safe response headers', async () => 
   assert.equal(attachment.headers.get('content-type'), 'application/octet-stream');
   assert.equal(attachment.headers.get('content-disposition'), 'attachment');
   assert.match(await attachment.text(), /<script>/);
+});
+
+
+test('deletes both stored message and metadata, and preserves metadata if R2 fails', async () => {
+  const context = fixture(); await receiveEmail(context.message, context.env);
+  const id = [...context.rows.keys()][0];
+  const originalDelete = context.env.INBOUND.delete;
+  context.env.INBOUND.delete = async () => { throw new Error('R2 unavailable'); };
+  await assert.rejects(() => deleteReceived(id, context.env));
+  assert.equal(context.rows.size, 1); assert.equal(context.objects.size, 1);
+  context.env.INBOUND.delete = originalDelete;
+  const deleted = await deleteReceived(id, context.env);
+  assert.equal(deleted.status, 200); assert.equal(context.rows.size, 0); assert.equal(context.objects.size, 0);
+  assert.equal((await deleteReceived(id, context.env)).status, 404);
 });
