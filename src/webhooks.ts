@@ -1,5 +1,5 @@
 import type { AuthEnv } from './auth';
-const types = new Set(['email.delivered', 'email.deferred', 'email.bounced', 'email.failed', 'email.rejected', 'email.complained']);
+const types = new Set(['email.sent', 'email.received', 'email.delivered', 'email.deferred', 'email.bounced', 'email.failed', 'email.rejected', 'email.complained']);
 const validEvents = (events: unknown): events is string[] => Array.isArray(events) && events.length > 0 && events.length <= types.size && events.every(event => typeof event === 'string' && types.has(event)) && new Set(events).size === events.length;
 const newSecret = () => 'whsec_' + btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
@@ -101,8 +101,9 @@ export async function processWebhooks(env: AuthEnv): Promise<void> {
     if (!claimed) continue;
     const row = await env.DB.prepare('SELECT d.id, d.attempts, w.endpoint, w.signing_secret, w.previous_secret, w.previous_secret_expires_at, e.id AS event_id, e.type, e.recipient, e.occurred_at, e.details, e.provider_id FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id JOIN delivery_events e ON e.id = d.event_id WHERE d.id = ?').bind(id).first<Pending>();
     if (!row) continue;
-    const email = await env.DB.prepare('SELECT id, sender, subject, created_at, tags FROM email_history WHERE provider_id = ?').bind(row.provider_id).first<{ id: string; sender: string; subject: string; created_at: string; tags: string }>();
-    const payload = JSON.stringify({ type: `email.${row.type}`, created_at: row.occurred_at, data: { email_id: email?.id ?? null, from: email?.sender ?? null, to: [row.recipient], subject: email?.subject ?? null, tags: email ? JSON.parse(email.tags) : [], details: JSON.parse(row.details) } });
+    const email = row.type === 'received' ? null : await env.DB.prepare('SELECT id, sender, subject, created_at, tags, recipients FROM email_history WHERE provider_id = ?').bind(row.provider_id).first<{ id: string; sender: string; subject: string; created_at: string; tags: string; recipients: string }>();
+    const received = row.type === 'received' ? await env.DB.prepare('SELECT id, sender, recipient, subject, created_at FROM inbound_emails WHERE id = ?').bind(row.event_id.slice('received:'.length)).first<{ id: string; sender: string; recipient: string; subject: string; created_at: string }>() : null;
+    const payload = JSON.stringify({ type: `email.${row.type}`, created_at: row.occurred_at, data: { email_id: received?.id ?? email?.id ?? null, from: received?.sender ?? email?.sender ?? null, to: row.type === 'sent' && email?.recipients ? JSON.parse(email.recipients) : [row.recipient], subject: received?.subject ?? email?.subject ?? null, tags: email ? JSON.parse(email.tags) : [], details: JSON.parse(row.details) } });
     let status: number | null = null;
     try {
       const headers = await webhookHeaders(row.signing_secret, `evt_${row.id}`, Math.floor(Date.now() / 1000), payload, row.previous_secret && row.previous_secret_expires_at && row.previous_secret_expires_at > new Date().toISOString() ? row.previous_secret : undefined);

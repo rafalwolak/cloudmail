@@ -45,3 +45,28 @@ test('dispatch signs events and records success or schedules a retry', async () 
     if (status === 503) assert.equal(operations[0].args[0], 'pending');
   }
 });
+
+test('lifecycle webhooks carry correct metadata without message bodies', async () => {
+  const { processWebhooks } = await import('../src/webhooks.ts');
+  const secret = 'whsec_' + btoa('01234567890123456789012345678901');
+  for (const kind of ['sent', 'received']) {
+    const posts = [];
+    const env = { DB: { prepare(sql) { return { bind(...args) { return {
+      async all() { return { results: [{ id: 'delivery1' }] }; },
+      async first() {
+        if (sql.includes('RETURNING attempts')) return { attempts: 1 };
+        if (sql.includes('JOIN webhooks')) return { id: 'delivery1', attempts: 1, endpoint: 'https://hooks.example.com/event', signing_secret: secret, event_id: `${kind}:email1`, type: kind, recipient: 'first@example.com', occurred_at: '2026-10-30T10:00:00.000Z', details: '{}', provider_id: 'provider1' };
+        if (sql.includes('FROM email_history')) return { id: 'email1', sender: 'sender@example.com', subject: 'Sent', tags: '[]', recipients: '["first@example.com","second@example.com"]' };
+        if (sql.includes('FROM inbound_emails')) return { id: 'email1', sender: 'sender@example.com', recipient: 'first@example.com', subject: 'Received' };
+        throw new Error(`Unexpected SQL: ${sql}`);
+      }, async run() {},
+    }; } }; } } };
+    const original = globalThis.fetch;
+    globalThis.fetch = async (_url, options) => { posts.push(JSON.parse(options.body)); return new Response(null, { status: 204 }); };
+    try { await processWebhooks(env); } finally { globalThis.fetch = original; }
+    assert.equal(posts[0].type, `email.${kind}`); assert.equal(posts[0].data.email_id, 'email1');
+    assert.deepEqual(posts[0].data.to, kind === 'sent' ? ['first@example.com', 'second@example.com'] : ['first@example.com']);
+    assert.equal(posts[0].data.subject, kind === 'sent' ? 'Sent' : 'Received');
+    assert.ok(!('html' in posts[0].data) && !('text' in posts[0].data));
+  }
+});
