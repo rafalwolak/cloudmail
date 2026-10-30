@@ -68,8 +68,18 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
     return json({ object: 'list', has_more: list.has_more, data: list.data.map(format) });
   }
   if (path === '/webhooks' && request.method === 'GET') {
-    const rows = await env.DB.prepare('SELECT id, endpoint, events, created_at FROM webhooks ORDER BY created_at DESC, id DESC LIMIT 100').all<{ id: string; endpoint: string; events: string; created_at: string }>();
-    return json({ object: 'list', data: rows.results.map(row => ({ ...row, events: JSON.parse(row.events) })) });
+    const params = new URL(request.url).searchParams; const raw = params.get('limit') ?? '100'; const after = params.get('after'); const before = params.get('before');
+    if ([...params.keys()].some(key => !['limit', 'after', 'before'].includes(key)) || ['limit', 'after', 'before'].some(key => params.getAll(key).length > 1) || !/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100 || (after !== null && before !== null) || after === '' || before === '') return json({ message: 'Invalid pagination' }, 400);
+    const cursor = after ?? before; let anchor: { id: string; created_at: string } | null = null;
+    if (cursor !== null) {
+      anchor = await env.DB.prepare('SELECT id, created_at FROM webhooks WHERE id = ?').bind(cursor).first<{ id: string; created_at: string }>();
+      if (!anchor) return json({ message: 'Invalid cursor' }, 400);
+    }
+    const direction = before !== null ? 'ASC' : 'DESC';
+    const condition = anchor ? `WHERE (created_at, id) ${before !== null ? '>' : '<'} (?, ?)` : '';
+    const rows = await env.DB.prepare(`SELECT id, endpoint, events, created_at FROM webhooks ${condition} ORDER BY created_at ${direction}, id ${direction} LIMIT ?`).bind(...(anchor ? [anchor.created_at, anchor.id] : []), Number(raw) + 1).all<{ id: string; endpoint: string; events: string; created_at: string }>();
+    const page = rows.results.slice(0, Number(raw)); if (before !== null) page.reverse();
+    return json({ object: 'list', has_more: rows.results.length > Number(raw), data: page.map(row => ({ ...row, events: JSON.parse(row.events) })) });
   }
   if (path === '/webhooks' && request.method === 'POST') {
     let body: unknown; try { body = await request.json(); } catch { return json({ message: 'Invalid JSON' }, 400); }

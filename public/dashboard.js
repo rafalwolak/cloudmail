@@ -558,11 +558,14 @@ $('#load-more').addEventListener('click', async () => {
   finally { button.disabled = false; }
 });
 let editingWebhookId = null;
+let webhookCursor = null;
 function resetWebhookForm() { editingWebhookId = null; $('#webhook-form').reset(); $('#webhook-form-title').textContent = 'Create webhook'; $('#webhook-form button[type=submit]').textContent = 'Create webhook'; $('#cancel-webhook-edit').hidden = true; }
 $('#cancel-webhook-edit').addEventListener('click', () => { resetWebhookForm(); $('#webhook-status').textContent = 'Edit canceled.'; });
-async function loadWebhooks() {
-  const result = await api('/api/webhooks'); const list = $('#webhook-list'); list.replaceChildren();
-  $('#empty-webhooks').hidden = result.data.length > 0;
+async function loadWebhooks(append = false) {
+  const params = new URLSearchParams({ limit: '20' }); if (append && webhookCursor) params.set('after', webhookCursor);
+  const result = await api(`/api/webhooks?${params}`); const list = $('#webhook-list'); if (!append) list.replaceChildren();
+  webhookCursor = result.data.at(-1)?.id || null; $('#more-webhooks').hidden = !result.has_more;
+  $('#empty-webhooks').hidden = list.children.length > 0 || result.data.length > 0;
   for (const webhook of result.data) {
     const item = document.createElement('li'); const endpoint = document.createElement('strong'); endpoint.textContent = webhook.endpoint;
     const events = document.createElement('span'); events.textContent = webhook.events.join(', ');
@@ -650,6 +653,11 @@ async function loadWebhooks() {
     item.append(endpoint, events, details, edit, rotate, remove); list.append(item);
   }
 }
+$('#more-webhooks').addEventListener('click', async event => {
+  event.currentTarget.disabled = true;
+  try { await loadWebhooks(true); } catch (error) { $('#webhook-status').textContent = error.message; }
+  finally { event.currentTarget.disabled = false; }
+});
 $('#webhook-form').addEventListener('submit', async event => {
   event.preventDefault(); const button = $('#webhook-form button[type="submit"]'); button.disabled = true;
   $('#webhook-secret').hidden = true; $('#webhook-secret-value').textContent = '';
