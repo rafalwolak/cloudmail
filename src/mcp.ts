@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
 import { parseEmail } from './email';
-import { resolveTemplate } from './templates';
+import { handleTemplates, resolveTemplate } from './templates';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
 import type { AuthEnv } from './auth';
 
@@ -57,6 +57,37 @@ export async function handleMcp(request: Request, env: AuthEnv): Promise<Respons
     inputSchema: z.object({ id: z.string().uuid() }).strict(),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ id }) => historyTool(`/emails/${encodeURIComponent(id)}`));
+  const templateFields = z.object({
+    name: z.string(), html: z.string(), text: z.string().optional(), from: z.string().optional(), subject: z.string().optional(), reply_to: z.string().optional(),
+    variables: z.array(z.object({ key: z.string(), type: z.enum(['string', 'number']), fallback_value: z.union([z.string(), z.number()]).optional() }).strict()).optional(),
+  }).strict();
+  const templateTool = async (path: string, method: string, body?: unknown) => {
+    const options: RequestInit = { method };
+    if (body !== undefined) { options.headers = { 'content-type': 'application/json' }; options.body = JSON.stringify(body); }
+    const response = await handleTemplates(new Request(new URL(path, env.BETTER_AUTH_URL), options), env);
+    return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
+  };
+  const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+  const mutating = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
+  server.registerTool('list_templates', {
+    description: 'List up to 100 template drafts. Pagination is not yet available.', inputSchema: z.object({}).strict(), annotations: readOnly,
+  }, async () => templateTool('/templates', 'GET'));
+  server.registerTool('get_template', {
+    description: 'Read a template draft and publication state.', inputSchema: z.object({ id: z.string().uuid() }).strict(), annotations: readOnly,
+  }, async ({ id }) => templateTool(`/templates/${id}`, 'GET'));
+  server.registerTool('create_template', {
+    description: 'Create an unpublished transactional email template. Declare variables used as triple-braced uppercase placeholders.', inputSchema: templateFields,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async args => templateTool('/templates', 'POST', args));
+  server.registerTool('update_template', {
+    description: 'Update a template draft without changing the published snapshot.', inputSchema: z.object({ id: z.string().uuid(), changes: templateFields.partial() }).strict(), annotations: mutating,
+  }, async ({ id, changes }) => templateTool(`/templates/${id}`, 'PATCH', changes));
+  server.registerTool('publish_template', {
+    description: 'Replace the published template snapshot with its current draft. This affects future email sends.', inputSchema: z.object({ id: z.string().uuid() }).strict(), annotations: mutating,
+  }, async ({ id }) => templateTool(`/templates/${id}/publish`, 'POST'));
+  server.registerTool('delete_template', {
+    description: 'Permanently delete a template and its published snapshot.', inputSchema: z.object({ id: z.string().uuid() }).strict(), annotations: mutating,
+  }, async ({ id }) => templateTool(`/templates/${id}`, 'DELETE'));
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
   return transport.handleRequest(request);

@@ -51,3 +51,32 @@ test('MCP rejects requests from an untrusted browser origin', async () => {
   const response = await fetch(`${base}/mcp`, { method: 'POST', headers: { authorization: `Bearer ${key}`, origin: 'https://attacker.example', 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: '{}' });
   assert.equal(response.status, 403);
 });
+
+test('MCP manages template drafts and published versions', async () => {
+  const client = new Client({ name: 'template-test', version: '1.0.0' });
+  const transport = new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { authorization: `Bearer ${key}` } } });
+  try {
+    await client.connect(transport);
+    const tools = await client.listTools();
+    const names = tools.tools.map(tool => tool.name);
+    for (const name of ['create_template', 'list_templates', 'get_template', 'update_template', 'publish_template', 'delete_template']) assert.ok(names.includes(name));
+    assert.equal(tools.tools.find(tool => tool.name === 'delete_template').annotations.destructiveHint, true);
+    const create = await client.callTool({ name: 'create_template', arguments: { name: 'MCP draft', html: '<p>Hello</p>' } });
+    assert.notEqual(create.isError, true);
+    const { id } = JSON.parse(create.content[0].text);
+    const list = await client.callTool({ name: 'list_templates', arguments: {} });
+    assert.ok(JSON.parse(list.content[0].text).data.some(item => item.id === id));
+    const update = await client.callTool({ name: 'update_template', arguments: { id, changes: { subject: 'Updated' } } });
+    assert.notEqual(update.isError, true);
+    const publish = await client.callTool({ name: 'publish_template', arguments: { id } });
+    assert.notEqual(publish.isError, true);
+    const get = await client.callTool({ name: 'get_template', arguments: { id } });
+    const item = JSON.parse(get.content[0].text);
+    assert.equal(item.status, 'published');
+    assert.equal(item.subject, 'Updated');
+    const remove = await client.callTool({ name: 'delete_template', arguments: { id } });
+    assert.equal(JSON.parse(remove.content[0].text).deleted, true);
+    const missing = await client.callTool({ name: 'get_template', arguments: { id } });
+    assert.equal(missing.isError, true);
+  } finally { await client.close(); }
+});
