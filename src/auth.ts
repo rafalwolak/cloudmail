@@ -1,3 +1,4 @@
+import type { OutboundEmail } from './email';
 import { betterAuth } from 'better-auth';
 
 export interface AuthEnv {
@@ -6,7 +7,7 @@ export interface AuthEnv {
   BETTER_AUTH_URL: string;
   AUTH_EMAIL_FROM?: string;
   ENABLE_SIGNUP?: string;
-  EMAIL: { send(message: { from: string; to: string; subject: string; text?: string; html?: string }): Promise<{ messageId: string }> };
+  EMAIL: { send(message: OutboundEmail): Promise<{ messageId: string }> };
 }
 
 export function createAuth(env: AuthEnv) {
