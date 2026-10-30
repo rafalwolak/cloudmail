@@ -81,9 +81,10 @@ export async function processScheduled(env: ScheduleEnv): Promise<void> {
       await env.DB.prepare('UPDATE scheduled_emails SET payload_r2_key = NULL WHERE id = ? AND payload_r2_key = ?').bind(item.id, item.payload_r2_key).run();
     } catch { console.error('Could not remove scheduled payload; cleanup will retry'); }
   }
-  const rows = await env.DB.prepare("SELECT id FROM scheduled_emails WHERE state = 'scheduled' AND scheduled_at <= ? ORDER BY scheduled_at LIMIT 20").bind(new Date().toISOString()).all<{ id: string }>();
+  const now = new Date().toISOString();
+  const rows = await env.DB.prepare("SELECT id FROM scheduled_emails WHERE state = 'scheduled' AND scheduled_at <= ? AND (prepare_after IS NULL OR prepare_after <= ?) ORDER BY scheduled_at, id LIMIT 20").bind(now, now).all<{ id: string }>();
   for (const { id } of rows.results) {
-    const claimed = await env.DB.prepare("UPDATE scheduled_emails SET state = 'sending' WHERE id = ? AND state = 'scheduled' AND scheduled_at <= ? RETURNING payload, payload_r2_key").bind(id, new Date().toISOString()).first<{ payload: string | null; payload_r2_key: string | null }>();
+    const claimed = await env.DB.prepare("UPDATE scheduled_emails SET state = 'sending' WHERE id = ? AND state = 'scheduled' AND scheduled_at <= ? AND (prepare_after IS NULL OR prepare_after <= ?) RETURNING payload, payload_r2_key, prepare_attempts").bind(id, new Date().toISOString(), new Date().toISOString()).first<{ payload: string | null; payload_r2_key: string | null; prepare_attempts: number }>();
     if (!claimed) continue;
     let email: OutboundEmail;
     try {
@@ -95,7 +96,9 @@ export async function processScheduled(env: ScheduleEnv): Promise<void> {
       await env.DB.prepare('UPDATE email_history SET body_stored = 1 WHERE id = ?').bind(id).run();
     } catch {
       // No send call has started, so returning the claim is safe to retry.
-      await env.DB.prepare("UPDATE scheduled_emails SET state = 'scheduled' WHERE id = ? AND state = 'sending'").bind(id).run();
+      const delay = Math.min(3600000, 60000 * 2 ** Math.min(claimed.prepare_attempts ?? 0, 6));
+      const retryAt = new Date(Date.now() + delay).toISOString();
+      await env.DB.prepare("UPDATE scheduled_emails SET state = 'scheduled', prepare_attempts = prepare_attempts + 1, prepare_after = ? WHERE id = ? AND state = 'sending'").bind(retryAt, id).run();
       console.error('Could not prepare scheduled email; will retry');
       continue;
     }

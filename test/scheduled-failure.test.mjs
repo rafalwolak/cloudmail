@@ -26,6 +26,6 @@ test('archive failures release the claim without attempting delivery or clearing
   };
   await processScheduled(env);
   assert.equal(sent, false);
-  assert.ok(updates.some(sql => sql.includes("SET state = 'scheduled' WHERE")));
+  assert.ok(updates.some(sql => sql.includes("SET state = 'scheduled', prepare_attempts")));
   assert.ok(!updates.some(sql => sql.includes('payload = NULL')));
 });
