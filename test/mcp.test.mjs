@@ -18,12 +18,18 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     await client.connect(transport);
     const tools = await client.listTools();
     assert.ok(tools.tools.some(tool => tool.name === 'send_email'));
+    assert.ok(tools.tools.some(tool => tool.name === 'list_emails'));
+    assert.ok(tools.tools.some(tool => tool.name === 'get_email'));
     const result = await client.callTool({ name: 'send_email', arguments: { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Test', text: 'Hello' } });
     assert.notEqual(result.isError, true);
     const id = JSON.parse(result.content[0].text).id;
     assert.ok(id);
     const history = await fetch(`${base}/emails/${id}`, { headers: { authorization: `Bearer ${key}` } });
     assert.equal((await history.json()).status, 'accepted');
+    const retrieved = await client.callTool({ name: 'get_email', arguments: { id } });
+    assert.equal(JSON.parse(retrieved.content[0].text).id, id);
+    const listed = await client.callTool({ name: 'list_emails', arguments: { limit: 10 } });
+    assert.ok(JSON.parse(listed.content[0].text).data.some(item => item.id === id));
     const invalid = await client.callTool({ name: 'send_email', arguments: { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Test', text: 'Hello', scheduled_at: '2027-01-01' } });
     assert.equal(invalid.isError, true);
   } finally { await client.close(); }

@@ -49,11 +49,28 @@ export async function readHistory(request: Request, env: AuthEnv): Promise<Respo
   const url = new URL(request.url);
   const fields = 'id, sender, recipients, subject, status, created_at';
   if (url.pathname === '/emails') {
-    if ([...url.searchParams.keys()].some(key => key !== 'limit')) return Response.json({ message: 'Unsupported query parameter' }, { status: 400 });
-    const raw = url.searchParams.get('limit') ?? '20';
+    const params = url.searchParams;
+    if ([...params.keys()].some(key => !['limit', 'before', 'after'].includes(key)) || ['limit', 'before', 'after'].some(key => params.getAll(key).length > 1)) return Response.json({ message: 'Unsupported or duplicate query parameter' }, { status: 400 });
+    const raw = params.get('limit') ?? '20';
     if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) return Response.json({ message: 'limit must be between 1 and 100' }, { status: 400 });
-    const result = await env.DB.prepare(`SELECT ${fields} FROM email_history ORDER BY created_at DESC, id DESC LIMIT ?`).bind(Number(raw)).all<HistoryRow>();
-    return Response.json({ data: result.results.map(format) }, { headers: { 'cache-control': 'no-store' } });
+    const before = params.get('before');
+    const after = params.get('after');
+    if ((before !== null && after !== null) || before === '' || after === '') return Response.json({ message: 'Provide only one valid cursor' }, { status: 400 });
+    const cursor = before ?? after;
+    let condition = '';
+    let values: (string | number)[] = [];
+    if (cursor !== null) {
+      const anchor = await env.DB.prepare('SELECT id, created_at FROM email_history WHERE id = ?').bind(cursor).first<{ id: string; created_at: string }>();
+      if (!anchor) return Response.json({ message: 'Invalid cursor' }, { status: 400 });
+      condition = before !== null ? 'WHERE (created_at, id) > (?, ?)' : 'WHERE (created_at, id) < (?, ?)';
+      values = [anchor.created_at, anchor.id];
+    }
+    const direction = before !== null ? 'ASC' : 'DESC';
+    const limit = Number(raw);
+    const result = await env.DB.prepare(`SELECT ${fields} FROM email_history ${condition} ORDER BY created_at ${direction}, id ${direction} LIMIT ?`).bind(...values, limit + 1).all<HistoryRow>();
+    const rows = result.results.slice(0, limit);
+    if (before !== null) rows.reverse();
+    return Response.json({ object: 'list', has_more: result.results.length > limit, data: rows.map(format) }, { headers: { 'cache-control': 'no-store' } });
   }
   const id = url.pathname.slice('/emails/'.length);
   const row = await env.DB.prepare(`SELECT ${fields} FROM email_history WHERE id = ?`).bind(id).first<HistoryRow>();

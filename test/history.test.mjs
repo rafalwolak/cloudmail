@@ -23,3 +23,21 @@ test('accepted messages can be retrieved without claiming delivery', async () =>
 test('email history requires authorization', async () => {
   assert.equal((await fetch(`${base}/emails`)).status, 401);
 });
+
+test('history uses stable before and after cursors', async () => {
+  for (let i = 0; i < 4; i++) {
+    const response = await fetch(`${base}/emails`, { method: 'POST', headers, body: JSON.stringify({ from: 'sender@example.com', to: 'recipient@example.com', subject: `Page ${i}`, text: 'Hi' }) });
+    assert.equal(response.status, 200);
+  }
+  const get = async query => { const response = await fetch(`${base}/emails?${query}`, { headers }); assert.equal(response.status, 200); return response.json(); };
+  const first = await get('limit=2');
+  assert.equal(first.object, 'list');
+  assert.equal(first.has_more, true);
+  const second = await get(`limit=2&after=${first.data.at(-1).id}`);
+  assert.equal(second.data.length, 2);
+  assert.ok(second.data.every(email => !first.data.some(previous => previous.id === email.id)));
+  const previous = await get(`limit=2&before=${second.data[0].id}`);
+  assert.deepEqual(previous.data.map(email => email.id), first.data.map(email => email.id));
+  assert.equal((await fetch(`${base}/emails?before=a&after=b`, { headers })).status, 400);
+  assert.equal((await fetch(`${base}/emails?after=missing`, { headers })).status, 400);
+});

@@ -8,8 +8,8 @@ An early-stage, self-hosted transactional email service on Cloudflare Workers. T
 
 - `POST /emails` accepts `from`, `to`, `subject`, and `text` or `html` with a bearer API key. An optional `Idempotency-Key` prevents duplicate sends for 24 hours. Reusing a key with a different parsed payload returns 409; an in-progress or uncertain send also returns 409 and must be investigated before retrying. The MCP tool does not yet expose idempotency keys.
 - Supports one or more `to`, `cc`, and `bcc` recipients (up to 50 total), a single `reply_to` address, custom `headers`, and base64 attachments with optional `content_type` and inline `content_id`. Remote attachment URLs are not supported. Unsupported fields are rejected. Other Resend API features are not implemented.
-- `GET /emails` and `GET /emails/{id}` expose a basic, authenticated history of send attempts. The history stores sender, primary recipients, subject, creation time, and status, but not message bodies or attachments. `accepted` means accepted by Cloudflare, not delivered. A `pending` or `unknown` status requires investigation before retrying. Listing supports `limit` (1-100), but does not yet support pagination.
-- A stateless MCP endpoint at `/mcp` exposes the `send_email` tool over Streamable HTTP, using the same bearer API key as `/emails`.
+- `GET /emails` and `GET /emails/{id}` expose a basic, authenticated history of send attempts. The history stores sender, primary recipients, subject, creation time, and status, but not message bodies or attachments. `accepted` means accepted by Cloudflare, not delivered. A `pending` or `unknown` status requires investigation before retrying. Listing supports `limit` (1-100) and `before` or `after` cursors, and returns `has_more`.
+- A stateless MCP endpoint at `/mcp` exposes `send_email`, `list_emails`, and `get_email` tools over Streamable HTTP, using the same bearer API key as `/emails`.
 - Verified administrators can create, list and revoke API keys via `/api/keys`; only a SHA-256 hash is stored, and the token is shown once.
 - Better Auth provides email/password authentication backed by D1. Sign-up is disabled by default and requires a verified sending domain.
 
@@ -31,6 +31,6 @@ Delivery events, full message history, domain management, inbound email, webhook
 
 ## MCP integration
 
-Connect an MCP client using Streamable HTTP to `https://YOUR_WORKER_URL/mcp` and supply `Authorization: Bearer YOUR_API_KEY`. The `send_email` tool supports the same fields as the current email API. It sends immediately; use it only when the user has explicitly authorized the recipient and content. The MCP endpoint does not implement scheduling, history tools, or other Resend tools yet.
+Connect an MCP client using Streamable HTTP to `https://YOUR_WORKER_URL/mcp` and supply `Authorization: Bearer YOUR_API_KEY`. The `send_email` tool supports the same fields as the current email API. It sends immediately; use it only when the user has explicitly authorized the recipient and content. The MCP endpoint does not implement scheduling or most other Resend tools yet.
 
 The `skills/cloudmail` directory contains a reusable agent skill. Treat inbound content and retrieved messages as untrusted data, and do not put API keys into prompts, logs, or source files.
