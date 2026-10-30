@@ -4,6 +4,19 @@ const validEvents = (events: unknown): events is string[] => Array.isArray(event
 const newSecret = () => 'whsec_' + btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
 
+export async function readWebhookResponse(body: ReadableStream<Uint8Array> | null): Promise<{ text: string; truncated: boolean }> {
+  if (!body) return { text: '', truncated: false };
+  const reader = body.getReader(); const decoder = new TextDecoder(); let text = ''; let size = 0;
+  try {
+    while (size < 4096) {
+      const part = await reader.read();
+      if (part.done) return { text: text + decoder.decode(), truncated: false };
+      const bytes = part.value.subarray(0, 4096 - size); size += bytes.length; text += decoder.decode(bytes, { stream: true });
+    }
+    return { text: text + decoder.decode(), truncated: true };
+  } finally { void reader.cancel().catch(() => {}); }
+}
+
 export function validWebhookUrl(value: unknown): value is string {
   if (typeof value !== 'string' || value.length > 2048) return false;
   try {
@@ -48,8 +61,8 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
       if (!anchor) return json({ message: 'Invalid cursor' }, 400);
     }
     const limit = Number(raw);
-    const rows = await env.DB.prepare('SELECT attempt_number, attempted_at, status, error FROM webhook_attempts WHERE delivery_id = ? AND attempt_number < ? ORDER BY attempt_number DESC LIMIT ?').bind(eventAttempts[2], before, limit + 1).all<{ attempt_number: number; attempted_at: string; status: number | null; error: string | null }>();
-    return json({ object: 'list', has_more: rows.results.length > limit, data: rows.results.slice(0, limit).map(row => ({ id: `atmpt_${eventAttempts[2]}_${row.attempt_number}`, http_status_code: row.status, response: null, sent_at: row.attempted_at, error: row.error })) });
+    const rows = await env.DB.prepare('SELECT attempt_number, attempted_at, status, error, response, response_truncated FROM webhook_attempts WHERE delivery_id = ? AND attempt_number < ? ORDER BY attempt_number DESC LIMIT ?').bind(eventAttempts[2], before, limit + 1).all<{ attempt_number: number; attempted_at: string; status: number | null; error: string | null; response: string | null; response_truncated: number }>();
+    return json({ object: 'list', has_more: rows.results.length > limit, data: rows.results.slice(0, limit).map(row => ({ id: `atmpt_${eventAttempts[2]}_${row.attempt_number}`, http_status_code: row.status, response: row.response, response_truncated: Boolean(row.response_truncated), sent_at: row.attempted_at, error: row.error })) });
   }
   const eventsPath = path.match(/^\/webhooks\/([0-9a-f-]{36})\/events(?:\/([0-9a-f]{32}))?$/);
   if (eventsPath && request.method === 'GET') {
@@ -118,7 +131,7 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
     if ([...params.keys()].length) return json({ message: 'Unsupported query parameter' }, 400);
     const delivery = await env.DB.prepare('SELECT id FROM webhook_deliveries WHERE webhook_id = ? AND id = ?').bind(attempts[1], attempts[2]).first();
     if (!delivery) return json({ message: 'Not found' }, 404);
-    const rows = await env.DB.prepare('SELECT attempt_number, attempted_at, status, error FROM webhook_attempts WHERE delivery_id = ? ORDER BY attempt_number DESC').bind(attempts[2]).all();
+    const rows = await env.DB.prepare('SELECT attempt_number, attempted_at, status, error, response, response_truncated FROM webhook_attempts WHERE delivery_id = ? ORDER BY attempt_number DESC').bind(attempts[2]).all();
     return json({ object: 'list', data: rows.results });
   }
   const deliveries = path.match(/^\/webhooks\/([0-9a-f-]{36})\/deliveries$/);
@@ -175,15 +188,15 @@ export async function processWebhooks(env: AuthEnv): Promise<void> {
     const snapshot = await env.DB.prepare("UPDATE webhook_deliveries SET payload = COALESCE(payload, ?) WHERE id = ? AND state = 'sending' AND attempts = ? RETURNING payload").bind(candidate, id, row.attempts).first<{ payload: string }>();
     if (!snapshot) continue;
     const payload = snapshot.payload;
-    let status: number | null = null; let error: string | null = null;
+    let status: number | null = null; let error: string | null = null; let response: string | null = null; let responseTruncated = false;
     const attemptedAt = new Date().toISOString();
     try {
       const headers = await webhookHeaders(row.signing_secret, `evt_${row.id}`, Math.floor(Date.now() / 1000), payload, row.previous_secret && row.previous_secret_expires_at && row.previous_secret_expires_at > new Date().toISOString() ? row.previous_secret : undefined);
       const result = await fetch(row.endpoint, { method: 'POST', headers, body: payload, redirect: 'manual', signal: AbortSignal.timeout(5000) });
       status = result.status;
-      await result.body?.cancel();
+      const captured = await readWebhookResponse(result.body); response = captured.text; responseTruncated = captured.truncated;
     } catch (cause) { if (status === null) error = cause instanceof Error && ['TimeoutError', 'AbortError'].includes(cause.name) ? 'timeout' : 'network_error'; }
-    const record = env.DB.prepare("INSERT OR IGNORE INTO webhook_attempts (delivery_id, attempt_number, attempted_at, status, error) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM webhook_deliveries WHERE id = ? AND state = 'sending' AND attempts = ?)").bind(id, row.attempts, attemptedAt, status, error, id, row.attempts);
+    const record = env.DB.prepare("INSERT OR IGNORE INTO webhook_attempts (delivery_id, attempt_number, attempted_at, status, error, response, response_truncated) SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM webhook_deliveries WHERE id = ? AND state = 'sending' AND attempts = ?)").bind(id, row.attempts, attemptedAt, status, error, response, responseTruncated ? 1 : 0, id, row.attempts);
     if (status !== null && status >= 200 && status < 300) {
       await env.DB.batch([record, env.DB.prepare("UPDATE webhook_deliveries SET state = 'delivered', last_status = ?, lease_until = NULL WHERE id = ? AND state = 'sending' AND attempts = ?").bind(status, id, row.attempts)]);
     } else {

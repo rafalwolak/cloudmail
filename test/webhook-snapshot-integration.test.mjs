@@ -8,7 +8,7 @@ test('webhook delivery retrieval and replay preserve the stored payload in D1', 
   const worker = new Miniflare({ workers: [{ config: { name: 'webhook-test', compatibilityDate: '2026-10-23', manifest: { mainModule: 'worker.mjs', modules: { 'worker.mjs': { type: 'esm', contents: bundle.outputFiles[0].text } } }, env: { DB: { type: 'd1', id: 'webhook-test-db' } } } }] });
   try {
     const db = await worker.getD1Database('DB');
-    await db.exec("CREATE TABLE webhooks (id TEXT PRIMARY KEY, endpoint TEXT, events TEXT, created_at TEXT); CREATE TABLE delivery_events (id TEXT PRIMARY KEY, type TEXT, occurred_at TEXT); CREATE TABLE webhook_deliveries (id TEXT PRIMARY KEY, webhook_id TEXT, event_id TEXT, state TEXT DEFAULT 'pending', attempts INTEGER DEFAULT 0, next_attempt TEXT, last_status INTEGER, lease_until TEXT, replay_of TEXT, payload TEXT, event_type TEXT, manual_once INTEGER DEFAULT 0); CREATE TABLE webhook_attempts (delivery_id TEXT, attempt_number INTEGER, attempted_at TEXT, status INTEGER, error TEXT)");
+    await db.exec("CREATE TABLE webhooks (id TEXT PRIMARY KEY, endpoint TEXT, events TEXT, created_at TEXT); CREATE TABLE delivery_events (id TEXT PRIMARY KEY, type TEXT, occurred_at TEXT); CREATE TABLE webhook_deliveries (id TEXT PRIMARY KEY, webhook_id TEXT, event_id TEXT, state TEXT DEFAULT 'pending', attempts INTEGER DEFAULT 0, next_attempt TEXT, last_status INTEGER, lease_until TEXT, replay_of TEXT, payload TEXT, event_type TEXT, manual_once INTEGER DEFAULT 0); CREATE TABLE webhook_attempts (delivery_id TEXT, attempt_number INTEGER, attempted_at TEXT, status INTEGER, error TEXT, response TEXT, response_truncated INTEGER DEFAULT 0)");
     const webhook = '00000000-0000-4000-8000-000000000001'; const delivery = '12345678901234567890123456789012';
     const payload = { type: 'email.delivery_delayed', data: { to: ['recipient@example.com'] } };
     await db.prepare('INSERT INTO webhooks VALUES (?, ?, ?, ?)').bind(webhook, 'https://example.com', '[]', '2030-01-01T00:00:00.000Z').run();
@@ -37,13 +37,13 @@ test('webhook delivery retrieval and replay preserve the stored payload in D1', 
     assert.equal(manual.status, 200); assert.deepEqual(await manual.json(), { object: 'webhook_event', id: delivery });
     assert.equal((await db.prepare('SELECT manual_once FROM webhook_deliveries WHERE id = ?').bind(delivery).first()).manual_once, 1);
     assert.equal((await worker.dispatchFetch(resendReplay, { method: 'POST' })).status, 409);
-    await db.prepare('INSERT INTO webhook_attempts VALUES (?, ?, ?, ?, ?)').bind(delivery, 1, '2030-01-01T00:01:00.000Z', 503, null).run();
-    await db.prepare('INSERT INTO webhook_attempts VALUES (?, ?, ?, ?, ?)').bind(delivery, 2, '2030-01-01T00:02:00.000Z', null, 'timeout').run();
+    await db.prepare('INSERT INTO webhook_attempts (delivery_id, attempt_number, attempted_at, status, error, response) VALUES (?, ?, ?, ?, ?, ?)').bind(delivery, 1, '2030-01-01T00:01:00.000Z', 503, null, 'Unavailable').run();
+    await db.prepare('INSERT INTO webhook_attempts (delivery_id, attempt_number, attempted_at, status, error) VALUES (?, ?, ?, ?, ?)').bind(delivery, 2, '2030-01-01T00:02:00.000Z', null, 'timeout').run();
     const attemptsUrl = `http://localhost/webhooks/${webhook}/events/${delivery}/attempts`;
     const attempts = await (await worker.dispatchFetch(`${attemptsUrl}?limit=1`)).json();
     assert.equal(attempts.has_more, true); assert.equal(attempts.data[0].error, 'timeout'); assert.equal(attempts.data[0].response, null);
     const next = await (await worker.dispatchFetch(`${attemptsUrl}?limit=1&after=${attempts.data[0].id}`)).json();
-    assert.equal(next.has_more, false); assert.equal(next.data[0].http_status_code, 503);
+    assert.equal(next.has_more, false); assert.equal(next.data[0].http_status_code, 503); assert.equal(next.data[0].response, 'Unavailable');
     assert.equal((await worker.dispatchFetch(`${attemptsUrl}?after=invalid`)).status, 400);
     assert.equal((await worker.dispatchFetch(`http://localhost/webhooks/${'1'.repeat(36)}/events/${delivery}/attempts`)).status, 404);
     const replay = await worker.dispatchFetch(`${path}/replay`, { method: 'POST' }); assert.equal(replay.status, 201);

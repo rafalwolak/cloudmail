@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { webhookHeaders, validWebhookUrl } from '../src/webhooks.ts';
+import { webhookHeaders, validWebhookUrl, readWebhookResponse } from '../src/webhooks.ts';
+
+test('webhook responses are bounded and preserve UTF-8', async () => {
+  assert.deepEqual(await readWebhookResponse(new Response('Zażółć').body), { text: 'Zażółć', truncated: false });
+  const large = await readWebhookResponse(new Response('a'.repeat(5000)).body);
+  assert.equal(large.text.length, 4096); assert.equal(large.truncated, true);
+  assert.deepEqual(await readWebhookResponse(null), { text: '', truncated: false });
+});
 
 test('webhook endpoints require safe HTTPS URLs', () => {
   assert.equal(validWebhookUrl('https://hooks.example.com/events'), true);

@@ -605,7 +605,7 @@ async function loadWebhooks(append = false) {
                   const result = await api(`/api/webhooks/${encodeURIComponent(webhook.id)}/deliveries/${encodeURIComponent(delivery.id)}/attempts`);
                   attemptContent.replaceChildren();
                   if (!result.data.length) attemptContent.textContent = 'No individual attempts recorded. Older attempts are unavailable.';
-                  for (const attempt of result.data) { const line = document.createElement('p'); line.textContent = `Attempt ${attempt.attempt_number} · ${new Date(attempt.attempted_at).toLocaleString()} · ${attempt.status === null ? attempt.error : `HTTP ${attempt.status}`}`; attemptContent.append(line); }
+                  for (const attempt of result.data) { const line = document.createElement('p'); line.textContent = `Attempt ${attempt.attempt_number} · ${new Date(attempt.attempted_at).toLocaleString()} · ${attempt.status === null ? attempt.error : `HTTP ${attempt.status}`}`; attemptContent.append(line); if (attempt.response) { const response = document.createElement('pre'); response.className = 'webhook-payload'; response.textContent = `${attempt.response}${attempt.response_truncated ? '\n[Response truncated]' : ''}`; attemptContent.append(response); } }
                   attemptDetails.dataset.loaded = 'true';
                 } catch (error) { attemptContent.textContent = `${error.message} Close and reopen to retry.`; }
                 finally { delete attemptDetails.dataset.loading; }
