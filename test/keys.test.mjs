@@ -26,8 +26,10 @@ test('verified admin can create, use and revoke a key', { skip: process.env.TEST
   const timestamps = await Promise.all(candidates.map(async path => ({ path, time: (await stat(path)).mtimeMs })));
   timestamps.sort((a, b) => b.time - a.time);
   const text = await readFile(timestamps[0].path, 'utf8');
-  const url = text.match(/http:\/\/127\.0\.0\.1:8787\/api\/auth\/verify-email\?[^\s]+/)?.[0];
-  assert.ok(url, 'verification link is present in the simulated email');
+  const link = text.match(/https?:\/\/[^\s]+\/api\/auth\/verify-email\?[^\s]+/)?.[0];
+  assert.ok(link, 'verification link is present in the simulated email');
+  const url = new URL(link);
+  assert.equal(url.origin, new URL(base).origin);
   const verification = await fetch(url, { redirect: 'manual' });
   assert.ok([200, 302].includes(verification.status));
   const signin = await fetch(`${base}/api/auth/sign-in/email`, { method: 'POST', headers, body: JSON.stringify({ email, password }) });
