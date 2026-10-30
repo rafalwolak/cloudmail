@@ -1,6 +1,7 @@
 import { parseStoredAttachments, readSentContent, storeSentContent } from './sent-content';
 import type { AuthEnv } from './auth';
 import type { OutboundEmail } from './email';
+import { withPlainText } from './plain-text';
 
 export class IdempotencyConflict extends Error {
   constructor(public code: string) { super(code); }
@@ -35,6 +36,7 @@ export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idem
   const to = Array.isArray(email.to) ? email.to : [email.to];
   const keyHash = idempotencyKey ? await digest(idempotencyKey) : null;
   const requestHash = keyHash ? await digest(JSON.stringify(email)) : null;
+  const prepared = withPlainText(email);
   if (keyHash) {
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     await env.DB.prepare('UPDATE email_history SET idempotency_key_hash = NULL WHERE idempotency_key_hash = ? AND created_at < ?').bind(keyHash, cutoff).run();
@@ -49,7 +51,7 @@ export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idem
   }
   if (retainContent) {
     try {
-      await storeSentContent(env.INBOUND, id, email);
+      await storeSentContent(env.INBOUND, id, prepared);
       await env.DB.prepare('UPDATE email_history SET body_stored = 1 WHERE id = ?').bind(id).run();
     } catch (error) {
       // No delivery was attempted. Only remove the object after D1 confirms the row is gone.
@@ -62,7 +64,7 @@ export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idem
   }
   let result: { messageId: string };
   try {
-    const { tags: _tags, ...message } = email;
+    const { tags: _tags, ...message } = prepared;
     result = await env.EMAIL.send(message);
   } catch (error) {
     try { await env.DB.prepare("UPDATE email_history SET status = 'unknown' WHERE id = ?").bind(id).run(); }

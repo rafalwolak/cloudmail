@@ -1,6 +1,7 @@
 import { storeSentContent } from './sent-content';
 import type { AuthEnv } from './auth';
 import type { OutboundEmail } from './email';
+import { withPlainText } from './plain-text';
 import { IdempotencyConflict, digest, serializeRecipients } from './history';
 import { cleanCanceledArchives, cleanOrphanedScheduledPayloads } from './scheduled-cleanup';
 
@@ -93,7 +94,7 @@ export async function processScheduled(env: ScheduleEnv): Promise<void> {
       const object = claimed.payload_r2_key ? await env.INBOUND.get(claimed.payload_r2_key) : null;
       const payload = claimed.payload_r2_key ? await object?.text() : claimed.payload;
       if (!payload) throw new Error('Scheduled payload is unavailable');
-      email = JSON.parse(payload) as OutboundEmail;
+      email = withPlainText(JSON.parse(payload) as OutboundEmail);
       await storeSentContent(env.INBOUND, id, email);
       await env.DB.prepare('UPDATE email_history SET body_stored = 1 WHERE id = ?').bind(id).run();
     } catch {
