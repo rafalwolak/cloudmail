@@ -204,3 +204,20 @@ test('preview token is session-bound and rejects cross-origin requests', { skip:
   assert.equal((await post('null', token)).status, 200);
   assert.equal((await fetch(`${base}/api/template-preview`)).status, 401);
 });
+
+test('dashboard sends a published template with variables', { skip: !process.env.TEST_DASHBOARD_ADMIN }, async () => {
+  const auth = await fetch(`${base}/api/auth/sign-in/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ email: process.env.TEST_DASHBOARD_ADMIN, password: process.env.TEST_DASHBOARD_PASSWORD }) });
+  assert.equal(auth.status, 200);
+  const cookie = auth.headers.get('set-cookie').split(';')[0];
+  const headers = { cookie, origin: base, 'content-type': 'application/json' };
+  const create = await fetch(`${base}/api/templates`, { method: 'POST', headers, body: JSON.stringify({ name: 'Dashboard template', html: '<p>Hello {{{NAME}}}</p>', variables: [{ key: 'NAME', type: 'string' }] }) });
+  assert.equal(create.status, 200); const { id } = await create.json();
+  try {
+    assert.equal((await fetch(`${base}/api/templates/${id}/publish`, { method: 'POST', headers })).status, 200);
+    const send = await fetch(`${base}/api/send`, { method: 'POST', headers, body: JSON.stringify({ from: 'sender@example.com', to: ['recipient@example.com'], subject: 'Template test', template: { id, variables: { NAME: '<Alex>' } } }) });
+    assert.equal(send.status, 200, await send.clone().text());
+    const result = await send.json();
+    const detail = await (await fetch(`${base}/api/history/${result.id}`, { headers: { cookie } })).json();
+    assert.equal(detail.html, '<p>Hello &lt;Alex&gt;</p>');
+  } finally { await fetch(`${base}/api/templates/${id}`, { method: 'DELETE', headers }); }
+});

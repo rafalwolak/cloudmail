@@ -45,7 +45,7 @@ function setSignedIn(session) {
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) { $('#account').textContent = `Signed in as ${session.user.email}`; if (cloudflareConnected) $('#cloudflare-status').textContent = 'Cloudflare connected. Choose zones to manage sending domains.'; }
-  else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); $('#compose-status').textContent = ''; composeKey = null; composeDirty = false; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; templateGeneration++; templateFilters = {}; $('#template-filter').reset(); $('#template-form').reset(); $('#template-form').hidden = true; $('#template-preview').hidden = true; $('#template-preview-content').replaceChildren(); templateId = null; templateDirty = false; }
+  else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); updateComposeMode(); $('#compose-status').textContent = ''; composeKey = null; composeDirty = false; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; templateGeneration++; templateFilters = {}; $('#template-filter').reset(); $('#template-form').reset(); $('#template-form').hidden = true; $('#template-preview').hidden = true; $('#template-preview-content').replaceChildren(); templateId = null; templateDirty = false; }
   if (!session) { inboxGeneration++; inboxFilters = {}; $('#inbox-filter').reset(); historyGeneration++; historyFilters = {}; $('#history-filter').reset(); }
 }
 let cloudflarePage = 1;
@@ -232,6 +232,13 @@ $('#cloudflare-suppression-form').addEventListener('submit', async event => {
 });
 let composeKey = null;
 let composeDirty = false;
+function updateComposeMode() {
+  const template = $('#compose-mode').value === 'template';
+  $('#compose-manual').hidden = template;
+  $('#compose-template-fields').hidden = !template;
+  $('#compose-template').required = template;
+}
+$('#compose-mode').addEventListener('change', updateComposeMode);
 $('#compose-form').addEventListener('input', () => { composeKey = null; composeDirty = true; });
 $('#compose-form').addEventListener('change', () => { composeKey = null; composeDirty = true; });
 $('#compose-form').addEventListener('submit', async event => {
@@ -240,20 +247,30 @@ $('#compose-form').addEventListener('submit', async event => {
   const parseAddresses = value => value.split(',').map(address => address.trim()).filter(Boolean);
   const to = parseAddresses($('#compose-to').value); const cc = parseAddresses($('#compose-cc').value); const bcc = parseAddresses($('#compose-bcc').value);
   const text = $('#compose-text').value; const html = $('#compose-html').value; const files = [...$('#compose-attachments').files];
-  if (!text.trim() && !html.trim()) { message.textContent = 'Provide plain text, HTML or both.'; $('#compose-text').focus(); return; }
+  const useTemplate = $('#compose-mode').value === 'template';
+  let template;
+  if (useTemplate) {
+    let variables;
+    try { variables = JSON.parse($('#compose-variables').value.trim() || '{}'); }
+    catch { message.textContent = 'Template variables must be valid JSON.'; $('#compose-variables').focus(); return; }
+    if (!variables || typeof variables !== 'object' || Array.isArray(variables)) { message.textContent = 'Template variables must be a JSON object.'; $('#compose-variables').focus(); return; }
+    const id = $('#compose-template').value.trim();
+    if (!id) { message.textContent = 'Enter a template ID or alias.'; $('#compose-template').focus(); return; }
+    template = { id, variables };
+  } else if (!text.trim() && !html.trim()) { message.textContent = 'Provide plain text, HTML or both.'; $('#compose-text').focus(); return; }
   if (to.length + cc.length + bcc.length > 50) { message.textContent = 'Use at most 50 recipients across To, Cc and Bcc.'; return; }
   if (files.length > 32 || files.reduce((sum, file) => sum + file.size, 0) > 5 * 1024 * 1024) { message.textContent = 'Use at most 32 files and 5 MiB of attachments. The complete message must also fit Cloudflare limits.'; return; }
   const scheduleInput = $('#compose-schedule'); const schedule = scheduleInput.value ? new Date(scheduleInput.value) : null;
   if (schedule && (!Number.isFinite(schedule.getTime()) || schedule.getTime() <= Date.now() || schedule.getTime() > Date.now() + 30 * 86400000)) { message.textContent = 'Choose a future time within the next 30 days.'; scheduleInput.focus(); return; }
-  const payload = { from: $('#compose-from').value.trim(), to, subject: $('#compose-subject').value, ...(text && { text }), ...(html && { html }), ...(cc.length && { cc }), ...(bcc.length && { bcc }), ...($('#compose-reply').value.trim() && { reply_to: $('#compose-reply').value.trim() }), ...(schedule && { scheduled_at: schedule.toISOString() }) };
-  if (!window.confirm(`${schedule ? `Schedule this transactional email for ${schedule.toLocaleString()}?` : 'Send this transactional email now?'}\nTo: ${to.join(', ')}\nCc: ${cc.join(', ') || 'None'}\nBcc: ${bcc.join(', ') || 'None'}\nSubject: ${payload.subject}`)) return;
+  const payload = { from: $('#compose-from').value.trim(), to, subject: $('#compose-subject').value, ...(useTemplate ? { template } : { ...(text && { text }), ...(html && { html }) }), ...(cc.length && { cc }), ...(bcc.length && { bcc }), ...($('#compose-reply').value.trim() && { reply_to: $('#compose-reply').value.trim() }), ...(schedule && { scheduled_at: schedule.toISOString() }) };
+  if (!window.confirm(`${schedule ? `Schedule this transactional email for ${schedule.toLocaleString()}?` : 'Send this transactional email now?'}\nTo: ${to.join(', ')}\nCc: ${cc.join(', ') || 'None'}\nBcc: ${bcc.join(', ') || 'None'}\nSubject: ${payload.subject}${useTemplate ? `\nPublished template: ${template.id}` : ''}`)) return;
   composeKey ??= crypto.randomUUID(); fields.disabled = true; message.textContent = 'Sending…';
   try {
     if (files.length) payload.attachments = await Promise.all(files.map(file => new Promise((resolve, reject) => {
       const reader = new FileReader(); reader.onerror = () => reject(new Error('Could not read attachment.')); reader.onload = () => resolve({ filename: file.name, content: String(reader.result).split(',')[1], content_type: file.type || 'application/octet-stream' }); reader.readAsDataURL(file);
     })));
     const result = await api('/api/send', { method: 'POST', headers: { 'Idempotency-Key': composeKey }, body: JSON.stringify(payload) });
-    form.reset(); composeKey = null; composeDirty = false; message.textContent = schedule ? `Scheduled for ${schedule.toLocaleString()}. Email ID: ${result.id}. Delivery is not yet confirmed.` : `Accepted by Cloudflare. Email ID: ${result.id}. Delivery is not yet confirmed.`;
+    form.reset(); updateComposeMode(); composeKey = null; composeDirty = false; message.textContent = schedule ? `Scheduled for ${schedule.toLocaleString()}. Email ID: ${result.id}. Delivery is not yet confirmed.` : `Accepted by Cloudflare. Email ID: ${result.id}. Delivery is not yet confirmed.`;
     try { await loadHistory(true); } catch { /* The email was accepted even if the history refresh fails. */ }
   } catch (error) { message.textContent = `${error.message} Check history before trying again; sending may be uncertain.`; }
   finally { fields.disabled = false; }
