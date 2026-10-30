@@ -26,6 +26,7 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     assert.notEqual(inbox.isError, true);
     assert.ok(tools.tools.some(tool => tool.name === 'list_emails'));
     assert.ok(tools.tools.some(tool => tool.name === 'get_email'));
+    assert.ok(tools.tools.some(tool => tool.name === 'check_domain_dns'));
     assert.equal(tools.tools.find(tool => tool.name === 'reschedule_email').annotations.idempotentHint, false);
     assert.match(tools.tools.find(tool => tool.name === 'get_email').description, /untrusted/);
     assert.ok(tools.tools.some(tool => tool.name === 'list_delivery_events'));

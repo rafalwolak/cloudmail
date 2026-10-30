@@ -32,3 +32,21 @@ test('domain operations require an administrator-selected zone and use its OAuth
     assert.equal((await manageSelectedZoneDomains(request(), { ...env, CLOUDFLARE_OAUTH_CLIENT_ID: '' }, 'admin')).status, 503);
   } finally { globalThis.fetch = original; db.sqlite.close(); }
 });
+
+test('DNS diagnostics use only the selected zone and preserve incomplete results', async () => {
+  const { checkSelectedDomainDns } = await import('../src/cloudflare-dns-diagnostics.ts');
+  const db = await database(), secret = 's'.repeat(40), original = globalThis.fetch, zone = 'a'.repeat(32), tag = 'b'.repeat(32);
+  const env = { DB: db, BETTER_AUTH_SECRET: secret, CLOUDFLARE_OAUTH_CLIENT_ID: 'client' };
+  const request = () => new Request(`https://example.com/api/cloudflare/zones/${zone}/domains/${tag}/dns/check`);
+  try {
+    await saveCloudflareOAuthTokens(db, secret, 'admin', { accessToken: 'access', refreshToken: 'refresh', expiresAt: Date.now() + 3600000 });
+    db.sqlite.prepare('INSERT INTO cloudflare_zones VALUES (?, ?, ?, ?)').run('admin', zone, 'example.com', 'account');
+    globalThis.fetch = async url => String(url).startsWith('https://api.cloudflare.com/')
+      ? Response.json({ success: true, result: [{ type: 'TXT', name: 'example.com', content: 'v=spf1 -all' }], result_info: { total_count: 2 } })
+      : Response.json({ Status: 0, Answer: [{ name: 'example.com.', type: 16, data: '"v=spf1 -all"' }] });
+    assert.equal((await checkSelectedDomainDns(request(), env, 'other')).status, 404);
+    const result = await (await checkSelectedDomainDns(request(), env, 'admin')).json();
+    assert.equal(result.incomplete, true);
+    assert.equal(result.data[0].status, 'match');
+  } finally { globalThis.fetch = original; db.sqlite.close(); }
+});

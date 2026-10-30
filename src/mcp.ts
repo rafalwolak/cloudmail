@@ -1,3 +1,4 @@
+import { checkSelectedDomainDns } from './cloudflare-dns-diagnostics';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
@@ -100,6 +101,12 @@ export async function handleMcp(request: Request, env: KeyEnv & InboundEnv & { C
   server.registerTool('list_domains', { description: 'List sending domains in a selected Cloudflare zone. Enabled does not verify DNS or delivery.', inputSchema: z.object({ zone_id: domainId }).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, async ({ zone_id }) => domainTool(zone_id, '', 'GET'));
   server.registerTool('get_domain', { description: 'Get a Cloudflare sending domain by zone ID and sending-domain tag.', inputSchema: z.object({ zone_id: domainId, id: domainId }).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, async ({ zone_id, id }) => domainTool(zone_id, `/${id}`, 'GET'));
   server.registerTool('get_domain_dns', { description: 'Get expected Cloudflare Email Sending DNS records for a domain. If incomplete is true, the returned list does not cover every record. These records do not establish public DNS or delivery readiness.', inputSchema: z.object({ zone_id: domainId, id: domainId }).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, async ({ zone_id, id }) => domainTool(zone_id, `/${id}/dns`, 'GET'));
+  server.registerTool('check_domain_dns', { description: 'Compare expected Email Sending DNS records with Cloudflare public DNS. Cached or incomplete results do not confirm email delivery.', inputSchema: z.object({ zone_id: domainId, id: domainId }).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, async ({ zone_id, id }) => {
+    const owner = await findKeyOwner(env);
+    if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'Verified administrator is not configured' }] };
+    const response = await checkSelectedDomainDns(new Request(new URL(`/api/cloudflare/zones/${zone_id}/domains/${id}/dns/check`, env.BETTER_AUTH_URL)), env, owner.id);
+    return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
+  });
   server.registerTool('create_domain', { description: 'Enable Cloudflare Email Sending in a selected zone. Only use when explicitly authorized.', inputSchema: z.object({ zone_id: domainId, name: z.string() }).strict(), annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } }, async ({ zone_id, name }) => domainTool(zone_id, '', 'POST', { name }));
   server.registerTool('delete_domain', { description: 'Disable Cloudflare Email Sending and remove sending DNS records, affecting other services. Only use when explicitly authorized.', inputSchema: z.object({ zone_id: domainId, id: domainId }).strict(), annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } }, async ({ zone_id, id }) => domainTool(zone_id, `/${id}`, 'DELETE'));
   const webhookTool = async (path: string, method: string, body?: unknown) => {

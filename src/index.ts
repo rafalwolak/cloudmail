@@ -1,4 +1,4 @@
-import { checkPublicDns } from './dns-check';
+import { checkSelectedDomainDns } from './cloudflare-dns-diagnostics';
 import { createAuth, type AuthEnv } from './auth';
 import { authenticationConfigured } from './auth-config';
 import { allowedSender, parseEmail } from './email';
@@ -114,12 +114,7 @@ export default {
       if (request.method !== 'GET' && request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
       if (url.pathname === '/api/cloudflare/zones' || url.pathname === '/api/cloudflare/zones/available') return handleCloudflareZones(request, env, admin.id);
       if (/^\/api\/cloudflare\/zones\/[a-f0-9]{32}\/domains\/[a-f0-9]{32}\/dns\/check$/i.test(url.pathname) && request.method === 'GET') {
-        const dnsUrl = new URL(request.url); dnsUrl.pathname = dnsUrl.pathname.slice(0, -'/check'.length);
-        const response = await manageSelectedZoneDomains(new Request(dnsUrl, request), env, admin.id);
-        if (!response.ok) return response;
-        const body = await response.json() as { data?: unknown; result_info?: unknown; incomplete?: boolean };
-        if (!Array.isArray(body.data) || body.data.length > 20 || body.data.some(record => !record || typeof record.type !== 'string' || typeof record.name !== 'string' || typeof record.content !== 'string')) return Response.json({ message: 'Unexpected Cloudflare DNS response' }, { status: 502 });
-        return Response.json({ object: 'domain_dns_check', data: await checkPublicDns(body.data), incomplete: body.incomplete === true, result_info: body.result_info }, { headers: { 'cache-control': 'no-store' } });
+        return checkSelectedDomainDns(request, env, admin.id);
       }
       if (/\/suppressions(?:\/|$)/.test(url.pathname)) return manageCloudflareSuppressions(request, env, admin.id);
       return manageSelectedZoneDomains(request, env, admin.id);
