@@ -42,6 +42,13 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     const templated = await client.callTool({ name: 'send_email', arguments: { to: 'recipient@example.com', template: { id: templateId } } });
     assert.notEqual(templated.isError, true);
     await fetch(`${base}/templates/${templateId}`, { method: 'DELETE', headers: { authorization: `Bearer ${key}` } });
+    const scheduled = await client.callTool({ name: 'send_email', arguments: { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Later', text: 'Hello', scheduled_at: new Date(Date.now() + 60000).toISOString() } });
+    assert.notEqual(scheduled.isError, true);
+    const scheduledId = JSON.parse(scheduled.content[0].text).id;
+    const rescheduled = await client.callTool({ name: 'reschedule_email', arguments: { id: scheduledId, scheduled_at: new Date(Date.now() + 120000).toISOString() } });
+    assert.notEqual(rescheduled.isError, true);
+    const canceled = await client.callTool({ name: 'cancel_email', arguments: { id: scheduledId } });
+    assert.notEqual(canceled.isError, true);
     const invalid = await client.callTool({ name: 'send_email', arguments: { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Test', text: 'Hello', scheduled_at: '2027-01-01' } });
     assert.equal(invalid.isError, true);
   } finally { await client.close(); }

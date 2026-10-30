@@ -3,6 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { z } from 'zod';
 import { parseEmail } from './email';
 import { handleTemplates, resolveTemplate } from './templates';
+import { manageSchedule, scheduleEmail, validateSchedule } from './scheduled';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
 import type { AuthEnv } from './auth';
 
@@ -17,20 +18,22 @@ export async function handleMcp(request: Request, env: AuthEnv): Promise<Respons
     inputSchema: z.object({
       from: z.string().optional(), to: addresses, subject: z.string().optional(), text: z.string().optional(), html: z.string().optional(),
       cc: addresses.optional(), bcc: addresses.optional(), reply_to: z.string().optional(), headers: z.record(z.string(), z.string()).optional(),
-      idempotency_key: z.string().min(1).max(256).optional(),
+      idempotency_key: z.string().min(1).max(256).optional(), scheduled_at: z.string().optional(),
       tags: z.array(z.object({ name: z.string(), value: z.string() }).strict()).max(100).optional(),
       template: z.object({ id: z.string(), variables: z.record(z.string(), z.union([z.string(), z.number()])).optional() }).strict().optional(),
       attachments: z.array(z.object({ filename: z.string(), content: z.string(), content_type: z.string().optional(), content_id: z.string().optional() }).strict()).optional(),
     }).strict(),
     annotations: { destructiveHint: false, readOnlyHint: false, idempotentHint: false, openWorldHint: true },
   }, async args => {
-    const { idempotency_key, ...payload } = args;
+    const { idempotency_key, scheduled_at, ...payload } = args;
+    const scheduledAt = scheduled_at === undefined ? undefined : validateSchedule(scheduled_at);
+    if (scheduledAt === null) return { isError: true, content: [{ type: 'text', text: 'scheduled_at must be an ISO 8601 time within 30 days' }] };
     const resolved = await resolveTemplate(payload, env);
     if (typeof resolved === 'string') return { isError: true, content: [{ type: 'text', text: resolved }] };
     const email = parseEmail(resolved);
     if (typeof email === 'string') return { isError: true, content: [{ type: 'text', text: email }] };
     try {
-      const result = await sendRecordedEmail(env, email, idempotency_key);
+      const result = scheduledAt ? await scheduleEmail(env, email, scheduledAt, idempotency_key) : await sendRecordedEmail(env, email, idempotency_key);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch (error) {
       if (error instanceof IdempotencyConflict) return { isError: true, content: [{ type: 'text', text: error.code }] };
@@ -58,6 +61,13 @@ export async function handleMcp(request: Request, env: AuthEnv): Promise<Respons
     inputSchema: z.object({ id: z.string().uuid() }).strict(),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ id }) => historyTool(`/emails/${encodeURIComponent(id)}`));
+  const scheduleTool = async (id: string, method: 'PATCH' | 'POST', scheduledAt?: string) => {
+    const path = `/emails/${id}${method === 'POST' ? '/cancel' : ''}`;
+    const response = await manageSchedule(new Request(new URL(path, env.BETTER_AUTH_URL), { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(scheduledAt === undefined ? {} : { scheduled_at: scheduledAt }) }), env);
+    return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
+  };
+  server.registerTool('reschedule_email', { description: 'Change the time of a scheduled transactional email.', inputSchema: z.object({ id: z.string().uuid(), scheduled_at: z.string() }).strict(), annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ id, scheduled_at }) => scheduleTool(id, 'PATCH', scheduled_at));
+  server.registerTool('cancel_email', { description: 'Cancel a scheduled transactional email before sending begins.', inputSchema: z.object({ id: z.string().uuid() }).strict(), annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } }, async ({ id }) => scheduleTool(id, 'POST'));
   const templateFields = z.object({
     alias: z.string().nullable().optional(), name: z.string(), html: z.string(), text: z.string().optional(), from: z.string().optional(), subject: z.string().optional(), reply_to: z.string().optional(),
     variables: z.array(z.object({ key: z.string(), type: z.enum(['string', 'number']), fallback_value: z.union([z.string(), z.number()]).optional() }).strict()).optional(),

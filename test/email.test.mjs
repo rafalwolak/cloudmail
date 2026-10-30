@@ -15,7 +15,7 @@ test('sends multiple recipients with cc, bcc, reply-to and headers', async () =>
 });
 
 test('rejects unsupported fields instead of silently discarding them', async () => {
-  const response = await send({ ...message, to: 'a@example.com', scheduled_at: '2027-01-01T00:00:00Z' });
+  const response = await send({ ...message, to: 'a@example.com', unsupported_field: 'value' });
   assert.equal(response.status, 400);
 });
 

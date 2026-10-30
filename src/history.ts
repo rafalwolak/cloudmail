@@ -5,7 +5,7 @@ export class IdempotencyConflict extends Error {
   constructor(public code: string) { super(code); }
 }
 
-async function digest(value: string): Promise<string> {
+export async function digest(value: string): Promise<string> {
   const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
   return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 }
@@ -41,14 +41,15 @@ export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idem
   return { id };
 }
 
-interface HistoryRow { id: string; sender: string; recipients: string; subject: string; status: string; created_at: string; tags: string }
+interface HistoryRow { id: string; sender: string; recipients: string; subject: string; status: string; created_at: string; tags: string; schedule_state: string | null; scheduled_at: string | null }
 function format(row: HistoryRow) {
-  return { id: row.id, from: row.sender, to: JSON.parse(row.recipients), subject: row.subject, status: row.status, created_at: row.created_at, tags: JSON.parse(row.tags) };
+  return { id: row.id, from: row.sender, to: JSON.parse(row.recipients), subject: row.subject, status: row.schedule_state ?? row.status, scheduled_at: row.scheduled_at, created_at: row.created_at, tags: JSON.parse(row.tags) };
 }
 
 export async function readHistory(request: Request, env: AuthEnv): Promise<Response> {
   const url = new URL(request.url);
-  const fields = 'id, sender, recipients, subject, status, created_at, tags';
+  const fields = "email_history.id, sender, recipients, subject, status, created_at, tags, scheduled_emails.state AS schedule_state, scheduled_at";
+  const tables = 'email_history LEFT JOIN scheduled_emails ON scheduled_emails.id = email_history.id';
   if (url.pathname === '/emails') {
     const params = url.searchParams;
     if ([...params.keys()].some(key => !['limit', 'before', 'after'].includes(key)) || ['limit', 'before', 'after'].some(key => params.getAll(key).length > 1)) return Response.json({ message: 'Unsupported or duplicate query parameter' }, { status: 400 });
@@ -63,18 +64,18 @@ export async function readHistory(request: Request, env: AuthEnv): Promise<Respo
     if (cursor !== null) {
       const anchor = await env.DB.prepare('SELECT id, created_at FROM email_history WHERE id = ?').bind(cursor).first<{ id: string; created_at: string }>();
       if (!anchor) return Response.json({ message: 'Invalid cursor' }, { status: 400 });
-      condition = before !== null ? 'WHERE (created_at, id) > (?, ?)' : 'WHERE (created_at, id) < (?, ?)';
+      condition = before !== null ? 'WHERE (created_at, email_history.id) > (?, ?)' : 'WHERE (created_at, email_history.id) < (?, ?)';
       values = [anchor.created_at, anchor.id];
     }
     const direction = before !== null ? 'ASC' : 'DESC';
     const limit = Number(raw);
-    const result = await env.DB.prepare(`SELECT ${fields} FROM email_history ${condition} ORDER BY created_at ${direction}, id ${direction} LIMIT ?`).bind(...values, limit + 1).all<HistoryRow>();
+    const result = await env.DB.prepare(`SELECT ${fields} FROM ${tables} ${condition} ORDER BY created_at ${direction}, email_history.id ${direction} LIMIT ?`).bind(...values, limit + 1).all<HistoryRow>();
     const rows = result.results.slice(0, limit);
     if (before !== null) rows.reverse();
     return Response.json({ object: 'list', has_more: result.results.length > limit, data: rows.map(format) }, { headers: { 'cache-control': 'no-store' } });
   }
   const id = url.pathname.slice('/emails/'.length);
-  const row = await env.DB.prepare(`SELECT ${fields}, provider_id FROM email_history WHERE id = ?`).bind(id).first<HistoryRow & { provider_id: string | null }>();
+  const row = await env.DB.prepare(`SELECT ${fields}, provider_id FROM ${tables} WHERE email_history.id = ?`).bind(id).first<HistoryRow & { provider_id: string | null }>();
   if (!row) return Response.json({ message: 'Not found' }, { status: 404 });
   const events = row.provider_id ? await env.DB.prepare('SELECT recipient, type, occurred_at FROM delivery_events WHERE provider_id = ? ORDER BY occurred_at ASC, id ASC LIMIT 101').bind(row.provider_id).all() : { results: [] };
   return Response.json({ ...format(row), delivery_events: events.results.slice(0, 100), delivery_events_has_more: events.results.length > 100 }, { headers: { 'cache-control': 'no-store' } });
