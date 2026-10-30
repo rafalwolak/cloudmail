@@ -145,3 +145,16 @@ test('dashboard webhooks require an administrator and reject cross-origin change
   assert.equal((await fetch(`${base}/api/webhooks/${id}/deliveries/${'0'.repeat(32)}/replay`, { method: 'POST', headers: { cookie, origin: 'https://attacker.example' } })).status, 403);
   assert.equal((await fetch(`${base}/api/webhooks/${id}`, { method: 'DELETE', headers: { cookie, origin: base } })).status, 200);
 });
+
+test('Cloudflare integration endpoints require an administrator session', async () => {
+  for (const [path, method] of [
+    ['/api/cloudflare/oauth/start', 'POST'],
+    ['/api/cloudflare/oauth/callback?state=invalid&code=invalid', 'GET'],
+    ['/api/cloudflare/zones', 'GET'],
+    ['/api/cloudflare/zones', 'POST'],
+    [`/api/cloudflare/zones/${'a'.repeat(32)}/domains`, 'GET'],
+  ]) {
+    const response = await fetch(`${base}${path}`, { method, headers: { origin: base, 'content-type': 'application/json' }, ...(method === 'POST' && { body: '{}' }) });
+    assert.equal(response.status, 401, `${method} ${path}`);
+  }
+});

@@ -10,9 +10,13 @@ import { handleTemplates, resolveTemplate } from './templates';
 import { processDeliveryBatch } from './delivery-events';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
 import { readMetrics } from './metrics';
+import { manageDomains } from './domains';
+import { manageSelectedZoneDomains } from './cloudflare-domain-management';
+import { handleCloudflareZones } from './cloudflare-zone-api';
+import { handleCloudflareOAuth } from './cloudflare-oauth-api';
 import { authorizeAdmin, findKeyOwner, handleKeyResources, keyPermission, manageKeys, type KeyEnv } from './keys';
 
-interface Env extends AuthEnv, KeyEnv, InboundEnv { API_KEY: string; ASSETS: Fetcher; DELIVERY_QUEUE_NAME?: string }
+interface Env extends AuthEnv, KeyEnv, InboundEnv { API_KEY: string; ASSETS: Fetcher; DELIVERY_QUEUE_NAME?: string; CLOUDFLARE_OAUTH_CLIENT_ID?: string }
 
 async function sendEmailRequest(request: Request, env: Env, sendingDomain: string | null): Promise<Response> {
   let data: unknown;
@@ -92,6 +96,19 @@ export default {
       url.pathname = '/webhooks' + url.pathname.slice('/api/webhooks'.length);
       return manageWebhooks(new Request(url, request), env);
     }
+    if (url.pathname.startsWith('/api/cloudflare/oauth/')) {
+      const admin = await authorizeAdmin(request, env);
+      if (admin instanceof Response) return admin;
+      if (request.method !== 'GET' && request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
+      return handleCloudflareOAuth(request, env, admin.id);
+    }
+    if (url.pathname === '/api/cloudflare/zones' || url.pathname.startsWith('/api/cloudflare/zones/')) {
+      const admin = await authorizeAdmin(request, env);
+      if (admin instanceof Response) return admin;
+      if (request.method !== 'GET' && request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
+      if (url.pathname === '/api/cloudflare/zones' || url.pathname === '/api/cloudflare/zones/available') return handleCloudflareZones(request, env, admin.id);
+      return manageSelectedZoneDomains(request, env, admin.id);
+    }
     if (url.pathname === '/api/templates' || url.pathname.startsWith('/api/templates/')) {
       const admin = await authorizeAdmin(request, env);
       if (admin instanceof Response) return admin;
@@ -110,13 +127,14 @@ export default {
       return new Response(response.body, { status: response.status, headers });
     }
     if (url.pathname === '/' && request.method === 'GET') return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'", 'x-content-type-options': 'nosniff' } });
-    if (url.pathname !== '/mcp' && !(url.pathname === '/webhooks' || url.pathname.startsWith('/webhooks/')) && !(url.pathname === '/api-keys' || url.pathname.startsWith('/api-keys/')) && !(url.pathname === '/templates' || url.pathname.startsWith('/templates/')) && !(url.pathname === '/emails/batch' && request.method === 'POST') && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && ['GET', 'PATCH', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/receiving/') && request.method === 'DELETE')) return Response.json({ message: 'Not found' }, { status: 404 });
+    if (url.pathname !== '/mcp' && !(url.pathname === '/domains' || url.pathname.startsWith('/domains/')) && !(url.pathname === '/webhooks' || url.pathname.startsWith('/webhooks/')) && !(url.pathname === '/api-keys' || url.pathname.startsWith('/api-keys/')) && !(url.pathname === '/templates' || url.pathname.startsWith('/templates/')) && !(url.pathname === '/emails/batch' && request.method === 'POST') && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && ['GET', 'PATCH', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/receiving/') && request.method === 'DELETE')) return Response.json({ message: 'Not found' }, { status: 404 });
     const authorization = request.headers.get('Authorization') || '';
     const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
     const access = env.API_KEY && token === env.API_KEY ? { permission: 'full_access' as const, sending_domain: null } : await keyPermission(env.DB, token, env.ADMIN_EMAIL);
     if (!access) return Response.json({ message: 'Unauthorized' }, { status: 401 });
     if (access.permission === 'sending_access' && url.pathname !== '/mcp' && !(request.method === 'POST' && (url.pathname === '/emails' || url.pathname === '/emails/batch'))) return Response.json({ message: 'Forbidden' }, { status: 403 });
     if (url.pathname === '/mcp') return handleMcp(request, env, access);
+    if (url.pathname === '/domains' || url.pathname.startsWith('/domains/')) return manageDomains(request, null);
     if (url.pathname === '/webhooks' || url.pathname.startsWith('/webhooks/')) return manageWebhooks(request, env);
     if (url.pathname === '/api-keys' || url.pathname.startsWith('/api-keys/')) {
       const owner = await findKeyOwner(env);

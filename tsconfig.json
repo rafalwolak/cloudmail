@@ -12,7 +12,8 @@
     "noEmit": true,
     "types": [
       "@cloudflare/workers-types"
-    ]
+    ],
+    "allowImportingTsExtensions": true
   },
   "include": [
     "src/**/*.ts"

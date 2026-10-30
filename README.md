@@ -31,7 +31,9 @@ Never use the API for marketing email: Cloudflare Email Service supports transac
 
 ## Roadmap
 
-Automatic event subscription setup, full message history, domain management, inbound email management, expanded webhook coverage, expanded MCP coverage, and end-to-end deployment tests remain to be implemented.
+Automatic event subscription setup, full message history, complete Resend-compatible domain APIs, expanded MCP coverage, and end-to-end deployment tests remain to be implemented.
+
+Domain management is experimental. A configured Cloudflare OAuth client lets an administrator authorize access, select zones, and enable Email Sending from the dashboard; MCP can inspect selected zones and manage sending domains. The current Cloudmail OAuth client is private and its callback is registered only for the project installation. The one-click workflow is not yet available for independent deployments or other Cloudflare accounts. DNS and delivery readiness are not verified, and list results may be incomplete when Cloudflare paginates them. Deleting a sending domain can remove shared DNS records and affect other applications. Changing `BETTER_AUTH_SECRET` makes stored OAuth tokens unreadable and requires reconnecting Cloudflare.
 
 ## MCP integration
 

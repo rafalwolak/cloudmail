@@ -10,6 +10,8 @@ import { handleTemplates, resolveTemplate } from './templates';
 import { manageSchedule, scheduleEmail, validateSchedule } from './scheduled';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
 import { readMetrics } from './metrics';
+import { manageSelectedZoneDomains } from './cloudflare-domain-management';
+import { listSelectedCloudflareZones } from './cloudflare-zone-selection';
 
 const addresses = z.union([z.string(), z.array(z.string())]);
 
@@ -22,7 +24,7 @@ const emailSchema = z.object({
       attachments: z.array(z.object({ filename: z.string(), content: z.string(), content_type: z.string().optional(), content_id: z.string().optional() }).strict()).optional(),
     }).strict();
 
-export async function handleMcp(request: Request, env: KeyEnv & InboundEnv, access: KeyAccess): Promise<Response> {
+export async function handleMcp(request: Request, env: KeyEnv & InboundEnv & { CLOUDFLARE_OAUTH_CLIENT_ID?: string }, access: KeyAccess): Promise<Response> {
   const origin = request.headers.get('origin');
   if (origin && origin !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
   const server = new McpServer({ name: 'cloudmail', version: '0.1.0' });
@@ -59,6 +61,24 @@ export async function handleMcp(request: Request, env: KeyEnv & InboundEnv, acce
     return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
   });
   if (access.permission === 'full_access') {
+  const domainTool = async (zoneId: string, path: string, method: string, body?: unknown) => {
+    const owner = await findKeyOwner(env);
+    if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'Verified administrator is not configured' }] };
+    const url = new URL(`/api/cloudflare/zones/${zoneId}/domains${path}`, env.BETTER_AUTH_URL);
+    const response = await manageSelectedZoneDomains(new Request(url, { method, ...(body !== undefined && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) }), env, owner.id);
+    return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
+  };
+  server.registerTool('list_cloudflare_zones', { description: 'List Cloudflare zones selected by the verified administrator for domain management.', inputSchema: z.object({}).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async () => {
+    const owner = await findKeyOwner(env);
+    if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'Verified administrator is not configured' }] };
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ data: await listSelectedCloudflareZones(env.DB, owner.id) }) }] };
+  });
+  const domainId = z.string().regex(/^[0-9a-f]{32}$/);
+  server.registerTool('list_domains', { description: 'List sending domains in a selected Cloudflare zone. Enabled does not verify DNS or delivery.', inputSchema: z.object({ zone_id: domainId }).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, async ({ zone_id }) => domainTool(zone_id, '', 'GET'));
+  server.registerTool('get_domain', { description: 'Get a Cloudflare sending domain by zone ID and sending-domain tag.', inputSchema: z.object({ zone_id: domainId, id: domainId }).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, async ({ zone_id, id }) => domainTool(zone_id, `/${id}`, 'GET'));
+  server.registerTool('get_domain_dns', { description: 'Get Cloudflare Email Sending DNS records for a domain.', inputSchema: z.object({ zone_id: domainId, id: domainId }).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }, async ({ zone_id, id }) => domainTool(zone_id, `/${id}/dns`, 'GET'));
+  server.registerTool('create_domain', { description: 'Enable Cloudflare Email Sending in a selected zone. Only use when explicitly authorized.', inputSchema: z.object({ zone_id: domainId, name: z.string() }).strict(), annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } }, async ({ zone_id, name }) => domainTool(zone_id, '', 'POST', { name }));
+  server.registerTool('delete_domain', { description: 'Disable Cloudflare Email Sending and remove sending DNS records, affecting other services. Only use when explicitly authorized.', inputSchema: z.object({ zone_id: domainId, id: domainId }).strict(), annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } }, async ({ zone_id, id }) => domainTool(zone_id, `/${id}`, 'DELETE'));
   const webhookTool = async (path: string, method: string, body?: unknown) => {
     const response = await manageWebhooks(new Request(new URL(path, env.BETTER_AUTH_URL), { method, ...(body !== undefined && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) }), env);
     return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };

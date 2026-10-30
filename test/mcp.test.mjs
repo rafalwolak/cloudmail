@@ -119,3 +119,15 @@ test('MCP manages template drafts and published versions', async () => {
     assert.equal(missing.isError, true);
   } finally { await client.close(); }
 });
+
+test('MCP exposes zone discovery and requires a zone for domain tools', async () => {
+  const client = new Client({ name: 'domain-discovery-test', version: '1.0.0' });
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { authorization: `Bearer ${key}` } } }));
+    const { tools } = await client.listTools();
+    const zone = tools.find(tool => tool.name === 'list_cloudflare_zones');
+    const domains = tools.find(tool => tool.name === 'list_domains');
+    assert.ok(zone); assert.equal(zone.annotations.readOnlyHint, true);
+    assert.ok(domains.inputSchema.required.includes('zone_id'));
+  } finally { await client.close(); }
+});

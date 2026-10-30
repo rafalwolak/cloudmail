@@ -66,7 +66,7 @@ test('sending-only keys cannot read data or manage resources', { skip: !process.
     const body = { from: 'a@example.com', to: 'b@example.com', subject: 'Hi', text: 'Hi' };
     assert.equal((await fetch(`${base}/emails`, { method: 'POST', headers: keyHeaders, body: JSON.stringify(body) })).status, 200);
     assert.equal((await fetch(`${base}/emails/batch`, { method: 'POST', headers: keyHeaders, body: JSON.stringify([body]) })).status, 200);
-    for (const path of ['/emails', '/emails/metrics', '/templates', '/webhooks']) assert.equal((await fetch(`${base}${path}`, { headers: keyHeaders })).status, 403);
+    for (const path of ['/emails', '/emails/metrics', '/templates', '/webhooks', '/domains']) assert.equal((await fetch(`${base}${path}`, { headers: keyHeaders })).status, 403);
     assert.equal((await fetch(`${base}/templates`, { method: 'POST', headers: keyHeaders, body: '{}' })).status, 403);
     const client = new Client({ name: 'limited-test', version: '1.0.0' });
     try {
