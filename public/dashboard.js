@@ -308,6 +308,27 @@ async function loadHistory(reset = false) {
       } catch (error) { recipientsContent.textContent = `${error.message} Close and reopen to retry.`; }
       finally { delete recipients.dataset.loading; }
     });
+    const bodyDetails = document.createElement('details');
+    const bodySummary = document.createElement('summary'); bodySummary.textContent = 'Message content';
+    const bodyContent = document.createElement('div'); bodyContent.className = 'delivery-events';
+    bodyDetails.append(bodySummary, bodyContent);
+    bodyDetails.addEventListener('toggle', async () => {
+      if (!bodyDetails.open || bodyDetails.dataset.loaded || bodyDetails.dataset.loading) return;
+      bodyDetails.dataset.loading = 'true'; bodyContent.textContent = 'Loading message content…';
+      try {
+        const result = await api(`/api/history/${encodeURIComponent(email.id)}`);
+        bodyContent.replaceChildren();
+        for (const [label, value] of [['Text', result.text], ['HTML source', result.html]]) {
+          if (typeof value !== 'string') continue;
+          const heading = document.createElement('strong'); heading.textContent = label;
+          const pre = document.createElement('pre'); pre.className = 'inbox-body'; pre.textContent = value;
+          bodyContent.append(heading, pre);
+        }
+        if (!bodyContent.children.length) bodyContent.textContent = 'Content is unavailable for this message.';
+        bodyDetails.dataset.loaded = 'true';
+      } catch (error) { bodyContent.textContent = `${error.message} Close and reopen to retry.`; }
+      finally { delete bodyDetails.dataset.loading; }
+    });
     const details = document.createElement('details');
     const summary = document.createElement('summary'); summary.textContent = 'Delivery events';
     const content = document.createElement('div'); content.className = 'delivery-events';
@@ -374,7 +395,7 @@ async function loadHistory(reset = false) {
         catch (error) { message.textContent = error.message; save.disabled = false; cancel.disabled = false; }
       });
     }
-    item.append(recipients, details); list.append(item);
+    item.append(bodyDetails, recipients, details); list.append(item);
   }
   historyCursor = result.data.at(-1)?.id || null;
   $('#empty-history').hidden = list.children.length > 0;
