@@ -117,9 +117,9 @@ export default {
         const dnsUrl = new URL(request.url); dnsUrl.pathname = dnsUrl.pathname.slice(0, -'/check'.length);
         const response = await manageSelectedZoneDomains(new Request(dnsUrl, request), env, admin.id);
         if (!response.ok) return response;
-        const body = await response.json() as { data?: unknown; result_info?: unknown };
+        const body = await response.json() as { data?: unknown; result_info?: unknown; incomplete?: boolean };
         if (!Array.isArray(body.data) || body.data.length > 20 || body.data.some(record => !record || typeof record.type !== 'string' || typeof record.name !== 'string' || typeof record.content !== 'string')) return Response.json({ message: 'Unexpected Cloudflare DNS response' }, { status: 502 });
-        return Response.json({ object: 'domain_dns_check', data: await checkPublicDns(body.data), result_info: body.result_info });
+        return Response.json({ object: 'domain_dns_check', data: await checkPublicDns(body.data), incomplete: body.incomplete === true, result_info: body.result_info }, { headers: { 'cache-control': 'no-store' } });
       }
       if (/\/suppressions(?:\/|$)/.test(url.pathname)) return manageCloudflareSuppressions(request, env, admin.id);
       return manageSelectedZoneDomains(request, env, admin.id);

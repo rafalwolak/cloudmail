@@ -120,6 +120,7 @@ async function loadCloudflareDomains() {
               if (!Array.isArray(report.data)) throw new Error('Unexpected DNS check response.');
               result.replaceChildren();
               const note = document.createElement('p'); note.textContent = 'Public DNS results can be cached and do not confirm email delivery.'; result.append(note);
+              if (report.incomplete) { const warning = document.createElement('p'); warning.textContent = 'This check covers an incomplete list of expected records. Check Cloudflare for the remaining records.'; result.append(warning); }
               for (const record of report.data) { const line = document.createElement('p'); line.textContent = `${record.type} · ${record.name} · ${record.status}`; result.append(line); }
             } catch (error) { if (generation === cloudflareGeneration) result.textContent = error.message; }
             finally { check.disabled = false; }
