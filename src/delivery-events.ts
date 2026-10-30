@@ -16,7 +16,7 @@ export function parseDeliveryEvent(value: unknown): DeliveryEvent | null {
   const failure = record(payload.failure); const rejection = record(payload.rejection);
   const details: Record<string, string | number | boolean> = {};
   const fields = [
-    ['smtp_status_code', delivery?.smtpStatusCode], ['smtp_enhanced_status_code', delivery?.smtpEnhancedStatusCode],
+    ['delivery_status', delivery?.status], ['smtp_status_code', delivery?.smtpStatusCode], ['smtp_enhanced_status_code', delivery?.smtpEnhancedStatusCode],
     ['smtp_response', delivery?.smtpResponse], ['bounce_type', bounce?.type], ['bounce_classification', bounce?.classification],
     ['bounce_reason', bounce?.reason], ['complaint_type', complaint?.type], ['provider', delivery?.provider],
     ['failure_reason', failure?.reason], ['rejection_reason', rejection?.reason], ['rejection_party', rejection?.party], ['rejection_detail', rejection?.detail],

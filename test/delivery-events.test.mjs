@@ -34,9 +34,11 @@ test('preserves bounded delivery and bounce diagnostics', () => {
 
 test('preserves documented rejection and failure diagnostics', () => {
   const rejected = { ...event, type: 'cf.email.sending.message.rejected', payload: { ...event.payload, terminal: true, delivery: { status: 'rejected', provider: 'external_smtp' }, rejection: { reason: 'suppressed', party: 'recipient', detail: 'Recipient is suppressed' } } };
-  assert.deepEqual(parseDeliveryEvent(rejected).details, { provider: 'external_smtp', rejection_reason: 'suppressed', rejection_party: 'recipient', rejection_detail: 'Recipient is suppressed', terminal: true });
+  assert.deepEqual(parseDeliveryEvent(rejected).details, { delivery_status: 'rejected', provider: 'external_smtp', rejection_reason: 'suppressed', rejection_party: 'recipient', rejection_detail: 'Recipient is suppressed', terminal: true });
   const failed = { ...event, type: 'cf.email.sending.message.failed', payload: { ...event.payload, terminal: true, failure: { reason: 'delivery_failed' } } };
   assert.deepEqual(parseDeliveryEvent(failed).details, { failure_reason: 'delivery_failed', terminal: true });
   const oversized = { ...failed, payload: { ...failed.payload, terminal: 'true', failure: { reason: 'x'.repeat(2049) } } };
   assert.deepEqual(parseDeliveryEvent(oversized).details, {});
+  const oversizedStatus = { ...rejected, payload: { ...rejected.payload, delivery: { status: 'x'.repeat(2049) } } };
+  assert.equal(parseDeliveryEvent(oversizedStatus).details.delivery_status, undefined);
 });
