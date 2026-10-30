@@ -6,13 +6,18 @@ An early-stage, self-hosted transactional email service on Cloudflare Workers. T
 
 - `POST /emails` accepts `from`, `to`, `subject`, and `text` or `html` with a bearer API key.
 - The `to` field currently accepts one address. Other Resend API features are not implemented.
+- Better Auth provides email/password authentication backed by D1. Sign-up is disabled by default and requires a verified sending domain.
 
 ## Deploy
 
 Install dependencies with `npm ci`, configure a sending domain in Cloudflare Email Service, and deploy with `npx wrangler deploy`. Set a long random `API_KEY` using `npx wrangler secret put API_KEY`. Cloudflare account and plan restrictions apply.
 
+Configure `BETTER_AUTH_URL` for your own deployment and replace the D1 database ID in `wrangler.jsonc` with one from your account. Apply migrations with `npx wrangler d1 migrations apply cloudmail-auth --remote` and set `BETTER_AUTH_SECRET` using `npx wrangler secret put BETTER_AUTH_SECRET`. Use a unique random secret with at least 32 bytes of entropy. To enable registration, set `AUTH_EMAIL_FROM` to an address on your verified sending domain and set `ENABLE_SIGNUP` to `true` in your deployment configuration. Keep registration disabled until you can receive verification emails. Authentication endpoints are under `/api/auth`; the user interface is not implemented yet.
+
+For local testing, configure `.dev.vars` with `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL=http://127.0.0.1:8787`, apply migrations with `npx wrangler d1 migrations apply cloudmail-auth --local`, start `npm run dev`, and run `npm test` in another terminal. To test registration, add `ENABLE_SIGNUP=true` and `AUTH_EMAIL_FROM` to `.dev.vars`, restart the local server, then run `TEST_SIGNUP=true npm test`. Local email sending is simulated by Wrangler.
+
 Never use the API for marketing email: Cloudflare Email Service supports transactional email only.
 
 ## Roadmap
 
-Better Auth, user and API key management, persistent message logs, domain management, inbound email, webhooks, MCP, and automated tests remain to be implemented.
+User and API key management, persistent message logs, domain management, inbound email, webhooks, MCP, and automated tests remain to be implemented.

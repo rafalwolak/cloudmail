@@ -3,6 +3,25 @@
   "name": "cloudmail",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-23",
-  "send_email": [{ "name": "EMAIL" }],
-  "observability": { "enabled": true }
+  "send_email": [
+    {
+      "name": "EMAIL"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cloudmail-auth",
+      "database_id": "5325bf9f-b6da-438d-9119-e24ca1fbd07b"
+    }
+  ],
+  "vars": {
+    "BETTER_AUTH_URL": "https://cloudmail.design4pro.workers.dev"
+  }
 }
