@@ -290,6 +290,18 @@ async function loadKeys() {
     const item = document.createElement('li');
     const name = document.createElement('span');
     name.textContent = `${key.name} · ${key.permission === 'sending_access' ? 'Send only' : 'Full access'}${key.sending_domain ? ` · ${key.sending_domain}` : ''}`;
+    const rename = document.createElement('button');
+    rename.type = 'button'; rename.className = 'text-button'; rename.textContent = 'Rename';
+    rename.setAttribute('aria-label', `Rename ${key.name}`);
+    rename.addEventListener('click', async () => {
+      const value = window.prompt('New key name (up to 50 characters)', key.name);
+      if (value === null) return;
+      if (!value.trim() || value.length > 50) { announce('Enter a name of 1-50 characters.'); return; }
+      rename.disabled = true;
+      try { await api(`/api/keys/${encodeURIComponent(key.id)}`, { method: 'PATCH', body: JSON.stringify({ name: value }) }); await loadKeys(); announce('Key renamed.'); }
+      catch (error) { announce(error.message); }
+      finally { rename.disabled = false; }
+    });
     const revoke = document.createElement('button');
     revoke.type = 'button'; revoke.className = 'text-button'; revoke.textContent = 'Revoke';
     revoke.setAttribute('aria-label', `Revoke ${key.name}`);
@@ -298,7 +310,8 @@ async function loadKeys() {
       try { await api(`/api/keys/${encodeURIComponent(key.id)}`, { method: 'DELETE' }); $('#new-key').hidden = true; $('#key-value').textContent = ''; await loadKeys(); announce('Key revoked.'); }
       catch (error) { announce(error.message); }
     });
-    item.append(name, revoke); list.append(item);
+    const actions = document.createElement('div'); actions.append(rename, revoke);
+    item.append(name, actions); list.append(item);
   }
 }
 let historyCursor = null;

@@ -57,6 +57,14 @@ export async function handleKeyResources(request: Request, env: KeyEnv, ownerId:
     await env.DB.prepare('INSERT INTO api_keys (id, user_id, name, key_hash, created_at, permission, sending_domain) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, ownerId, name.trim(), await hashKey(key), new Date().toISOString(), permission, typeof domain === 'string' ? domain.toLowerCase() : null).run();
     return Response.json({ id, token: key }, { status: 201, headers: { 'cache-control': 'no-store' } });
   }
+  if (request.method === 'PATCH' && path.startsWith('/api/keys/')) {
+    const id = path.slice('/api/keys/'.length);
+    let body: unknown;
+    try { body = await request.json(); } catch { return Response.json({ message: 'Invalid JSON' }, { status: 400 }); }
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 || !('name' in body) || typeof body.name !== 'string' || !body.name.trim() || body.name.length > 50) return Response.json({ message: 'A name of 1-50 characters is required' }, { status: 400 });
+    const result = await env.DB.prepare('UPDATE api_keys SET name = ? WHERE id = ? AND user_id = ?').bind(body.name.trim(), id, ownerId).run();
+    return result.meta.changes ? Response.json({ object: 'api_key', id }, { headers: { 'cache-control': 'no-store' } }) : Response.json({ message: 'Not found' }, { status: 404 });
+  }
   if (request.method === 'DELETE' && path.startsWith('/api/keys/')) {
     const id = path.slice('/api/keys/'.length);
     const result = await env.DB.prepare('DELETE FROM api_keys WHERE id = ? AND user_id = ?').bind(id, ownerId).run();

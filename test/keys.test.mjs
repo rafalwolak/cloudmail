@@ -140,11 +140,24 @@ test('full-access API keys can manage keys through REST and MCP', { skip: !proce
   const list = await fetch(`${base}/api-keys`, { headers: full }); assert.equal(list.status, 200);
   assert.equal((await list.json()).data.find(item => item.id === id).sending_domain, 'example.com');
   assert.equal((await fetch(`${base}/api-keys`, { headers: { authorization: `Bearer ${token}` } })).status, 403);
+  const rename = (name, headers = full) => fetch(`${base}/api-keys/${id}`, { method: 'PATCH', headers, body: JSON.stringify({ name }) });
+  assert.equal((await rename('Renamed via API')).status, 200);
+  assert.equal((await rename('   ')).status, 400);
+  assert.equal((await rename('x'.repeat(51))).status, 400);
+  assert.equal((await rename('Denied', { authorization: `Bearer ${token}`, 'content-type': 'application/json' })).status, 403);
+  const renamed = (await (await fetch(`${base}/api-keys`, { headers: full })).json()).data.find(item => item.id === id);
+  assert.equal(renamed.name, 'Renamed via API');
+  assert.equal(renamed.permission, 'sending_access');
+  assert.equal(renamed.sending_domain, 'example.com');
+  assert.equal((await fetch(`${base}/emails`, { headers: { authorization: `Bearer ${token}` } })).status, 403);
+
   const client = new Client({ name: 'key-management-test', version: '1.0.0' });
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: full } }));
     const tools = await client.listTools();
     for (const name of ['create_api_key', 'list_api_keys', 'delete_api_key']) assert.ok(tools.tools.some(tool => tool.name === name));
+    assert.notEqual((await client.callTool({ name: 'update_api_key', arguments: { id, name: 'Renamed via MCP' } })).isError, true);
+    assert.equal((await (await fetch(`${base}/api-keys`, { headers: full })).json()).data.find(item => item.id === id).name, 'Renamed via MCP');
     const createdByMcp = await client.callTool({ name: 'create_api_key', arguments: { name: 'MCP scoped test', permission: 'sending_access' } });
     assert.notEqual(createdByMcp.isError, true);
     const mcpKey = JSON.parse(createdByMcp.content[0].text);
