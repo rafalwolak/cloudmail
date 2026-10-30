@@ -130,7 +130,12 @@ test('MCP exposes zone discovery and requires a zone for domain tools', async ()
     const { tools } = await client.listTools();
     const zone = tools.find(tool => tool.name === 'list_cloudflare_zones');
     const domains = tools.find(tool => tool.name === 'list_domains');
+    const settings = tools.find(tool => tool.name === 'update_domain_settings');
     assert.ok(zone); assert.equal(zone.annotations.readOnlyHint, true);
     assert.ok(domains.inputSchema.required.includes('zone_id'));
+    assert.equal(settings.annotations.destructiveHint, true);
+    assert.equal(settings.annotations.idempotentHint, true);
+    const invalid = await client.callTool({ name: 'update_domain_settings', arguments: { zone_id: 'a'.repeat(32), id: 'b'.repeat(32), preview_enabled: 'true' } });
+    assert.equal(invalid.isError, true);
   } finally { await client.close(); }
 });
