@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { receiveEmail, readReceived, deleteReceived } from '../src/inbound.ts';
+import { receiveEmail, readReceived, readReceivedAttachmentForAgent, deleteReceived } from '../src/inbound.ts';
 const raw = 'From: sender@example.com\r\nTo: inbox@example.com\r\nSubject: Hello\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello inbox';
 function fixture() {
   const objects = new Map(); const rows = new Map();
@@ -51,6 +51,20 @@ test('returns attachments as downloads with safe response headers', async () => 
   assert.equal(attachment.headers.get('content-type'), 'application/octet-stream');
   assert.equal(attachment.headers.get('content-disposition'), "attachment; filename*=UTF-8''unsafe.html");
   assert.match(await attachment.text(), /<script>/);
+  const agent = await readReceivedAttachmentForAgent(id, 0, context.env);
+  assert.equal(agent.isError, undefined);
+  assert.match(atob(JSON.parse(agent.content[0].text).content_base64), /<script>/);
+  assert.equal((await readReceivedAttachmentForAgent(id, 1, context.env)).isError, true);
+});
+
+test('agent attachment response rejects files above its size limit', async () => {
+  const context = fixture();
+  const mime = `MIME-Version: 1.0\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename="large.bin"\r\n\r\n${'a'.repeat(1024 * 1024 + 1)}`;
+  context.message.raw = new Blob([mime]).stream(); context.message.rawSize = mime.length;
+  await receiveEmail(context.message, context.env);
+  const result = await readReceivedAttachmentForAgent([...context.rows.keys()][0], 0, context.env);
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /size limit/);
 });
 
 test('encodes untrusted Unicode attachment filenames in download headers', async () => {

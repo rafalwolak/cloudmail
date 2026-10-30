@@ -48,9 +48,20 @@ export async function readReceived(request: Request, env: InboundEnv): Promise<R
     const attachment = parsed.attachments[Number(match[2])];
     if (!attachment) return response({ message: 'Not found' }, 404);
     const filename = attachment.filename ? encodeURIComponent(new TextDecoder().decode(new TextEncoder().encode(attachment.filename))).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`) : null;
-    return new Response(bytes(attachment.content), { headers: { 'content-type': 'application/octet-stream', 'content-disposition': filename ? `attachment; filename*=UTF-8''${filename}` : 'attachment', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' } });
+    const content = bytes(attachment.content);
+    return new Response(content, { headers: { 'content-type': 'application/octet-stream', 'content-length': String(content.byteLength), 'content-disposition': filename ? `attachment; filename*=UTF-8''${filename}` : 'attachment', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' } });
   }
   return response({ id: row.id, from: row.sender, to: row.recipient, subject: parsed.subject ?? row.subject, created_at: row.created_at, text: parsed.text ?? null, html: parsed.html ?? null, message_id: parsed.messageId ?? null, attachments: parsed.attachments.map((attachment, index) => ({ id: String(index), filename: attachment.filename, content_type: attachment.mimeType, size: bytes(attachment.content).byteLength })) });
+}
+
+export async function readReceivedAttachmentForAgent(id: string, index: number, env: InboundEnv) {
+  const result = await readReceived(new Request(`https://cloudmail.invalid/emails/receiving/${id}/attachments/${index}`), env);
+  if (!result.ok) return { isError: true, content: [{ type: 'text' as const, text: JSON.stringify(await result.json()) }] };
+  if (Number(result.headers.get('content-length')) > 1024 * 1024) return { isError: true, content: [{ type: 'text' as const, text: 'Attachment exceeds the 1 MiB MCP size limit; download it through the authenticated API.' }] };
+  const data = new Uint8Array(await result.arrayBuffer());
+  let binary = '';
+  for (let offset = 0; offset < data.length; offset += 8192) binary += String.fromCharCode(...data.subarray(offset, offset + 8192));
+  return { content: [{ type: 'text' as const, text: JSON.stringify({ content_base64: btoa(binary), size: data.length }) }] };
 }
 
 export async function deleteReceived(id: string, env: InboundEnv): Promise<Response> {
