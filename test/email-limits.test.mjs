@@ -1,7 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseEmail } from '../src/email.ts';
+import { allowedSender, parseEmail } from '../src/email.ts';
 const message = { from: 'a@example.test', to: 'b@example.test', subject: 'Test', text: 'Hello' };
+
+test('domain-scoped sending permits only threading headers without weakening sender restrictions', () => {
+  const reply = parseEmail({ ...message, headers: { 'In-Reply-To': '<first@example.test>', references: '<first@example.test>' } });
+  assert.equal(allowedSender(reply, 'example.test'), true);
+  assert.equal(allowedSender({ ...reply, from: 'a@other.test' }, 'example.test'), false);
+  assert.equal(allowedSender({ ...reply, headers: { ...reply.headers, From: 'a@other.test' } }, 'example.test'), false);
+  assert.equal(allowedSender({ ...reply, headers: { 'X-Anything': 'value' } }, 'example.test'), false);
+  assert.equal(typeof parseEmail({ ...message, headers: { 'In-Reply-To': '<x>\r\nFrom: attacker' } }), 'string');
+});
 
 test('validates subject length and rejects line breaks', () => {
   assert.equal(typeof parseEmail({ ...message, subject: 'a'.repeat(998) }), 'object');

@@ -102,6 +102,9 @@ test('domain-scoped keys enforce the sender for HTTP, templates, batch and MCP',
     assert.equal(list.data.find(item => item.id === id).sending_domain, 'example.com');
     const send = body => fetch(`${base}/emails`, { method: 'POST', headers, body: JSON.stringify(body) });
     assert.equal((await send(msg)).status, 200);
+    const reply = { ...msg, headers: { 'In-Reply-To': '<first@example.com>', References: '<first@example.com>' } };
+    assert.equal((await send(reply)).status, 200);
+    assert.equal((await fetch(`${base}/emails/batch`, { method: 'POST', headers, body: JSON.stringify([reply]) })).status, 200);
     for (const from of ['hello@other.com', 'hello@sub.example.com', 'hello@example.com,evil@other.com', 'hello@other.com <hello@example.com>']) assert.equal((await send({ ...msg, from })).status, 403);
     assert.equal((await send({ ...msg, headers: { From: 'evil@other.com' } })).status, 403);
     assert.equal((await fetch(`${base}/emails/batch`, { method: 'POST', headers, body: JSON.stringify([msg, { ...msg, from: 'hello@other.com' }]) })).status, 403);
