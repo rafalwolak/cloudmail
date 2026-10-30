@@ -6,7 +6,7 @@ import { manageSchedule, processScheduled, scheduleEmail, validateSchedule } fro
 import { handleTemplates, resolveTemplate } from './templates';
 import { processDeliveryBatch } from './delivery-events';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
-import { authorizeAdmin, isValidKey, manageKeys, type KeyEnv } from './keys';
+import { authorizeAdmin, keyPermission, manageKeys, type KeyEnv } from './keys';
 
 interface Env extends AuthEnv, KeyEnv { API_KEY: string; ASSETS: Fetcher; DELIVERY_QUEUE_NAME?: string }
 
@@ -58,7 +58,9 @@ export default {
     if (url.pathname !== '/mcp' && !(url.pathname === '/templates' || url.pathname.startsWith('/templates/')) && !(url.pathname === '/emails/batch' && request.method === 'POST') && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && ['GET', 'PATCH', 'POST'].includes(request.method))) return Response.json({ message: 'Not found' }, { status: 404 });
     const authorization = request.headers.get('Authorization') || '';
     const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
-    if (!(env.API_KEY && token === env.API_KEY) && !await isValidKey(env.DB, token, env.ADMIN_EMAIL)) return Response.json({ message: 'Unauthorized' }, { status: 401 });
+    const permission = env.API_KEY && token === env.API_KEY ? 'full_access' : await keyPermission(env.DB, token, env.ADMIN_EMAIL);
+    if (!permission) return Response.json({ message: 'Unauthorized' }, { status: 401 });
+    if (permission === 'sending_access' && !(request.method === 'POST' && (url.pathname === '/emails' || url.pathname === '/emails/batch'))) return Response.json({ message: 'Forbidden' }, { status: 403 });
     if (url.pathname === '/mcp') return handleMcp(request, env);
     if (url.pathname === '/templates' || url.pathname.startsWith('/templates/')) return handleTemplates(request, env);
     if (url.pathname === '/emails/batch' && request.method === 'POST') return sendBatch(request, env);

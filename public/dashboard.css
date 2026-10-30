@@ -11,3 +11,5 @@
 textarea{width:100%;min-width:0;resize:vertical;border:1px solid #667667;background:#101813;color:var(--ink);font:inherit;padding:.85rem}textarea:focus-visible{outline:3px solid var(--accent);outline-offset:4px}.template-actions{display:flex;flex-wrap:wrap;gap:.5rem}button:disabled{opacity:.55;cursor:not-allowed}.template-actions .secondary{margin-top:.5rem}
 
 .schedule-form{margin:0 0 .75rem}.schedule-form label{margin:.75rem 0 .25rem}.schedule-form input{max-width:22rem}.schedule-form>button{width:auto;display:inline-flex;margin:.5rem .5rem 0 0}.schedule-form .secondary{margin-top:.5rem}
+
+select{width:100%;border:1px solid #667667;background:#101813;color:var(--ink);padding:.85rem;font:inherit}select:focus-visible{outline:3px solid var(--accent);outline-offset:4px}

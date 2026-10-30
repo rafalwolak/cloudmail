@@ -48,3 +48,24 @@ test('verified admin can create, use and revoke a key', { skip: process.env.TEST
   assert.equal(revoke.status, 204);
   assert.equal((await send()).status, 401);
 });
+
+test('sending-only keys cannot read data or manage resources', { skip: !process.env.TEST_DASHBOARD_ADMIN }, async () => {
+  const login = await fetch(`${base}/api/auth/sign-in/email`, { method: 'POST', headers: { origin: base, 'content-type': 'application/json' }, body: JSON.stringify({ email: process.env.TEST_DASHBOARD_ADMIN, password: process.env.TEST_DASHBOARD_PASSWORD }) });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const admin = { cookie, origin: base, 'content-type': 'application/json' };
+  const create = await fetch(`${base}/api/keys`, { method: 'POST', headers: admin, body: JSON.stringify({ name: 'Limited test', permission: 'sending_access' }) });
+  assert.equal(create.status, 201);
+  const { id, token } = await create.json();
+  try {
+    const keyHeaders = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+    const list = await (await fetch(`${base}/api/keys`, { headers: { cookie } })).json();
+    assert.equal(list.data.find(item => item.id === id).permission, 'sending_access');
+    const body = { from: 'a@example.com', to: 'b@example.com', subject: 'Hi', text: 'Hi' };
+    assert.equal((await fetch(`${base}/emails`, { method: 'POST', headers: keyHeaders, body: JSON.stringify(body) })).status, 200);
+    assert.equal((await fetch(`${base}/emails/batch`, { method: 'POST', headers: keyHeaders, body: JSON.stringify([body]) })).status, 200);
+    for (const path of ['/emails', '/templates', '/mcp']) assert.equal((await fetch(`${base}${path}`, { headers: keyHeaders })).status, 403);
+    assert.equal((await fetch(`${base}/templates`, { method: 'POST', headers: keyHeaders, body: '{}' })).status, 403);
+    assert.equal((await fetch(`${base}/mcp`, { method: 'POST', headers: keyHeaders, body: '{}' })).status, 403);
+  } finally { await fetch(`${base}/api/keys/${id}`, { method: 'DELETE', headers: admin }); }
+});
