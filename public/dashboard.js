@@ -20,7 +20,7 @@ function setSignedIn(session) {
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) $('#account').textContent = `Signed in as ${session.user.email}`;
-  else { $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
+  else { $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
 }
 async function loadKeys() {
   const { data } = await api('/api/keys');
@@ -95,6 +95,7 @@ $('#load-more').addEventListener('click', async () => {
 });
 let templateId = null;
 let templateDirty = false;
+let templateCursor = null;
 const templateForm = $('#template-form');
 const templateStatus = $('#template-status');
 function confirmDiscard() { return !templateDirty || window.confirm('Discard unsaved template changes?'); }
@@ -113,10 +114,14 @@ function openTemplate(template = null) {
   $('#delete-template').hidden = !template;
   updatePublishButton(); templateForm.hidden = false; $('#template-name').focus();
 }
-async function loadTemplates() {
-  const result = await api('/api/templates');
-  const list = $('#template-list'); list.replaceChildren();
-  $('#empty-templates').hidden = result.data.length > 0;
+async function loadTemplates(append = false) {
+  const params = new URLSearchParams({ limit: '20' });
+  if (append && templateCursor) params.set('after', templateCursor);
+  const result = await api(`/api/templates?${params}`);
+  const list = $('#template-list'); if (!append) list.replaceChildren();
+  $('#empty-templates').hidden = list.children.length > 0 || result.data.length > 0;
+  templateCursor = result.data.at(-1)?.id || null;
+  $('#more-templates').hidden = !result.has_more;
   for (const template of result.data) {
     const item = document.createElement('li');
     const name = document.createElement('span'); name.textContent = `${template.name} · ${template.status}`;
@@ -127,10 +132,23 @@ async function loadTemplates() {
       try { openTemplate(await api(`/api/templates/${encodeURIComponent(template.id)}`)); templateStatus.textContent = ''; }
       catch (error) { templateStatus.textContent = error.message; }
     });
-    item.append(name, edit); list.append(item);
+    const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'text-button'; copy.textContent = 'Duplicate';
+    copy.setAttribute('aria-label', `Duplicate ${template.name}`);
+    copy.addEventListener('click', async () => {
+      copy.disabled = true;
+      try { await api(`/api/templates/${encodeURIComponent(template.id)}/duplicate`, { method: 'POST', body: '{}' }); await loadTemplates(); templateStatus.textContent = 'Unpublished copy created.'; }
+      catch (error) { templateStatus.textContent = error.message; }
+      finally { copy.disabled = false; }
+    });
+    const actions = document.createElement('span'); actions.append(edit, copy);
+    item.append(name, actions); list.append(item);
   }
-  if (result.has_more) templateStatus.textContent = 'Only the first 100 templates are shown.';
 }
+$('#more-templates').addEventListener('click', async () => {
+  const button = $('#more-templates'); button.disabled = true;
+  try { await loadTemplates(true); } catch (error) { templateStatus.textContent = error.message; }
+  finally { button.disabled = false; }
+});
 $('#new-template').addEventListener('click', () => { if (confirmDiscard()) { openTemplate(); templateStatus.textContent = ''; } });
 $('#cancel-template').addEventListener('click', () => { if (confirmDiscard()) { templateForm.hidden = true; templateDirty = false; $('#new-template').focus(); } });
 templateForm.addEventListener('input', () => { templateDirty = true; updatePublishButton(); });

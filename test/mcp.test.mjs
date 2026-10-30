@@ -59,7 +59,7 @@ test('MCP manages template drafts and published versions', async () => {
     await client.connect(transport);
     const tools = await client.listTools();
     const names = tools.tools.map(tool => tool.name);
-    for (const name of ['create_template', 'list_templates', 'get_template', 'update_template', 'publish_template', 'delete_template']) assert.ok(names.includes(name));
+    for (const name of ['create_template', 'list_templates', 'get_template', 'update_template', 'publish_template', 'duplicate_template', 'delete_template']) assert.ok(names.includes(name));
     assert.equal(tools.tools.find(tool => tool.name === 'delete_template').annotations.destructiveHint, true);
     const create = await client.callTool({ name: 'create_template', arguments: { name: 'MCP draft', html: '<p>Hello</p>' } });
     assert.notEqual(create.isError, true);
@@ -74,6 +74,12 @@ test('MCP manages template drafts and published versions', async () => {
     const item = JSON.parse(get.content[0].text);
     assert.equal(item.status, 'published');
     assert.equal(item.subject, 'Updated');
+    const copy = await client.callTool({ name: 'duplicate_template', arguments: { id } });
+    assert.notEqual(copy.isError, true);
+    const copyId = JSON.parse(copy.content[0].text).id;
+    const page = await client.callTool({ name: 'list_templates', arguments: { limit: 1 } });
+    assert.equal(JSON.parse(page.content[0].text).data.length, 1);
+    await client.callTool({ name: 'delete_template', arguments: { id: copyId } });
     const remove = await client.callTool({ name: 'delete_template', arguments: { id } });
     assert.equal(JSON.parse(remove.content[0].text).deleted, true);
     const missing = await client.callTool({ name: 'get_template', arguments: { id } });

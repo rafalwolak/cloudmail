@@ -31,12 +31,30 @@ const json = (value: unknown, status = 200) => Response.json(value, { status, he
 const format = (row: TemplateRow) => ({ id: row.id, ...JSON.parse(row.draft), status: row.published ? 'published' : 'draft', created_at: row.created_at, updated_at: row.updated_at });
 
 export async function handleTemplates(request: Request, env: AuthEnv): Promise<Response> {
-  const path = new URL(request.url).pathname;
-  const match = path.match(/^\/templates\/([0-9a-f-]{36})(?:\/(publish))?$/);
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const match = path.match(/^\/templates\/([0-9a-f-]{36})(?:\/(publish|duplicate))?$/);
   const id = match?.[1];
   if (path === '/templates' && request.method === 'GET') {
-    const rows = await env.DB.prepare('SELECT * FROM templates ORDER BY created_at DESC, id DESC LIMIT 101').all<TemplateRow>();
-    return json({ object: 'list', data: rows.results.slice(0, 100).map(format), has_more: rows.results.length > 100 });
+    const params = url.searchParams;
+    if ([...params.keys()].some(key => !['limit', 'before', 'after'].includes(key)) || ['limit', 'before', 'after'].some(key => params.getAll(key).length > 1)) return json({ message: 'Unsupported or duplicate query parameter' }, 400);
+    const raw = params.get('limit') ?? '20';
+    if (!/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) return json({ message: 'limit must be between 1 and 100' }, 400);
+    const before = params.get('before'); const after = params.get('after');
+    if ((before !== null && after !== null) || before === '' || after === '') return json({ message: 'Provide only one valid cursor' }, 400);
+    const cursor = before ?? after;
+    let condition = ''; let values: (string | number)[] = [];
+    if (cursor !== null) {
+      const anchor = await env.DB.prepare('SELECT id, created_at FROM templates WHERE id = ?').bind(cursor).first<{ id: string; created_at: string }>();
+      if (!anchor) return json({ message: 'Invalid cursor' }, 400);
+      condition = before !== null ? 'WHERE (created_at, id) > (?, ?)' : 'WHERE (created_at, id) < (?, ?)';
+      values = [anchor.created_at, anchor.id];
+    }
+    const direction = before !== null ? 'ASC' : 'DESC'; const limit = Number(raw);
+    const rows = await env.DB.prepare(`SELECT * FROM templates ${condition} ORDER BY created_at ${direction}, id ${direction} LIMIT ?`).bind(...values, limit + 1).all<TemplateRow>();
+    const result = rows.results.slice(0, limit);
+    if (before !== null) result.reverse();
+    return json({ object: 'list', data: result.map(format), has_more: rows.results.length > limit });
   }
   if (path === '/templates' && request.method === 'POST') {
     let body: unknown; try { body = await request.json(); } catch { return json({ message: 'Invalid JSON' }, 400); }
@@ -48,6 +66,13 @@ export async function handleTemplates(request: Request, env: AuthEnv): Promise<R
   if (!id) return json({ message: 'Not found' }, 404);
   const row = await env.DB.prepare('SELECT * FROM templates WHERE id = ?').bind(id).first<TemplateRow>();
   if (!row) return json({ message: 'Not found' }, 404);
+  if (match?.[2] === 'duplicate' && request.method === 'POST') {
+    const draft: Template = JSON.parse(row.draft);
+    const copy = { ...draft, name: `${draft.name.slice(0, 93)} (copy)` };
+    const newId = crypto.randomUUID(); const now = new Date().toISOString();
+    await env.DB.prepare('INSERT INTO templates (id, draft, created_at, updated_at) VALUES (?, ?, ?, ?)').bind(newId, JSON.stringify(copy), now, now).run();
+    return json({ object: 'template', id: newId });
+  }
   if (match?.[2] === 'publish' && request.method === 'POST') {
     await env.DB.prepare('UPDATE templates SET published = draft, updated_at = ? WHERE id = ?').bind(new Date().toISOString(), id).run();
     return json({ id });

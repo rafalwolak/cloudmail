@@ -70,8 +70,14 @@ export async function handleMcp(request: Request, env: AuthEnv): Promise<Respons
   const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
   const mutating = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
   server.registerTool('list_templates', {
-    description: 'List up to 100 template drafts. Pagination is not yet available.', inputSchema: z.object({}).strict(), annotations: readOnly,
-  }, async () => templateTool('/templates', 'GET'));
+    description: 'List template drafts using optional before or after cursors.', inputSchema: z.object({ limit: z.number().int().min(1).max(100).optional(), before: z.string().optional(), after: z.string().optional() }).strict(), annotations: readOnly,
+  }, async args => {
+    const params = new URLSearchParams();
+    if (args.limit !== undefined) params.set('limit', String(args.limit));
+    if (args.before !== undefined) params.set('before', args.before);
+    if (args.after !== undefined) params.set('after', args.after);
+    return templateTool(`/templates?${params}`, 'GET');
+  });
   server.registerTool('get_template', {
     description: 'Read a template draft and publication state.', inputSchema: z.object({ id: z.string().uuid() }).strict(), annotations: readOnly,
   }, async ({ id }) => templateTool(`/templates/${id}`, 'GET'));
@@ -85,6 +91,10 @@ export async function handleMcp(request: Request, env: AuthEnv): Promise<Respons
   server.registerTool('publish_template', {
     description: 'Replace the published template snapshot with its current draft. This affects future email sends.', inputSchema: z.object({ id: z.string().uuid() }).strict(), annotations: mutating,
   }, async ({ id }) => templateTool(`/templates/${id}/publish`, 'POST'));
+  server.registerTool('duplicate_template', {
+    description: 'Create an unpublished copy of a template draft.', inputSchema: z.object({ id: z.string().uuid() }).strict(),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async ({ id }) => templateTool(`/templates/${id}/duplicate`, 'POST'));
   server.registerTool('delete_template', {
     description: 'Permanently delete a template and its published snapshot.', inputSchema: z.object({ id: z.string().uuid() }).strict(), annotations: mutating,
   }, async ({ id }) => templateTool(`/templates/${id}`, 'DELETE'));

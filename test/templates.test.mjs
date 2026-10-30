@@ -52,3 +52,32 @@ test('published templates can be used in batch sends', async () => {
   assert.equal((await response.json()).data.length, 2);
   await call(`/templates/${id}`, 'DELETE');
 });
+
+test('templates support cursor pagination and duplicate into an unpublished draft', async () => {
+  const ids = [];
+  for (let i = 0; i < 4; i++) {
+    const created = await call('/templates', 'POST', { name: `Pagination ${i}`, html: '<p>Hello</p>' });
+    ids.push((await created.json()).id);
+  }
+  try {
+    const first = await (await call('/templates?limit=2', 'GET')).json();
+    assert.equal(first.data.length, 2);
+    assert.equal(first.has_more, true);
+    const secondResponse = await call(`/templates?limit=2&after=${first.data.at(-1).id}`, 'GET');
+    assert.equal(secondResponse.status, 200);
+    const second = await secondResponse.json();
+    assert.ok(second.data.every(item => !first.data.some(other => other.id === item.id)));
+    const previous = await (await call(`/templates?limit=2&before=${second.data[0].id}`, 'GET')).json();
+    assert.deepEqual(previous.data.map(item => item.id), first.data.map(item => item.id));
+    assert.equal((await call('/templates?after=a&before=b', 'GET')).status, 400);
+    assert.equal((await call('/templates?after=missing', 'GET')).status, 400);
+    await call(`/templates/${ids[0]}/publish`, 'POST');
+    const duplicate = await call(`/templates/${ids[0]}/duplicate`, 'POST');
+    assert.equal(duplicate.status, 200);
+    const copiedId = (await duplicate.json()).id;
+    ids.push(copiedId);
+    const copy = await (await call(`/templates/${copiedId}`, 'GET')).json();
+    assert.equal(copy.status, 'draft');
+    assert.equal(copy.html, '<p>Hello</p>');
+  } finally { for (const id of ids) await call(`/templates/${id}`, 'DELETE'); }
+});
