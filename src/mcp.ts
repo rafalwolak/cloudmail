@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
 import { parseEmail } from './email';
+import { sendRecordedEmail } from './history';
 import type { AuthEnv } from './auth';
 
 const addresses = z.union([z.string(), z.array(z.string())]);
@@ -22,10 +23,10 @@ export async function handleMcp(request: Request, env: AuthEnv): Promise<Respons
     const email = parseEmail(args);
     if (typeof email === 'string') return { isError: true, content: [{ type: 'text', text: email }] };
     try {
-      const result = await env.EMAIL.send(email);
-      return { content: [{ type: 'text', text: JSON.stringify({ id: result.messageId }) }] };
+      const result = await sendRecordedEmail(env, email);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     } catch {
-      return { isError: true, content: [{ type: 'text', text: 'Email could not be sent. Check the sending domain and Cloudflare configuration.' }] };
+      return { isError: true, content: [{ type: 'text', text: 'Email could not be confirmed. Check history before retrying; delivery may be uncertain.' }] };
     }
   });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });

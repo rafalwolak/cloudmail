@@ -20,7 +20,10 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     assert.ok(tools.tools.some(tool => tool.name === 'send_email'));
     const result = await client.callTool({ name: 'send_email', arguments: { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Test', text: 'Hello' } });
     assert.notEqual(result.isError, true);
-    assert.ok(JSON.parse(result.content[0].text).id);
+    const id = JSON.parse(result.content[0].text).id;
+    assert.ok(id);
+    const history = await fetch(`${base}/emails/${id}`, { headers: { authorization: `Bearer ${key}` } });
+    assert.equal((await history.json()).status, 'accepted');
     const invalid = await client.callTool({ name: 'send_email', arguments: { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Test', text: 'Hello', scheduled_at: '2027-01-01' } });
     assert.equal(invalid.isError, true);
   } finally { await client.close(); }

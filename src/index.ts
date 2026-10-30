@@ -1,6 +1,7 @@
 import { createAuth, type AuthEnv } from './auth';
 import { parseEmail } from './email';
 import { handleMcp } from './mcp';
+import { readHistory, sendRecordedEmail } from './history';
 import { isValidKey, manageKeys, type KeyEnv } from './keys';
 
 interface Env extends AuthEnv, KeyEnv { API_KEY: string; ASSETS: Fetcher }
@@ -26,18 +27,19 @@ export default {
       return new Response(response.body, { status: response.status, headers });
     }
     if (url.pathname === '/' && request.method === 'GET') return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'", 'x-content-type-options': 'nosniff' } });
-    if (url.pathname !== '/mcp' && (url.pathname !== '/emails' || request.method !== 'POST')) return Response.json({ message: 'Not found' }, { status: 404 });
+    if (url.pathname !== '/mcp' && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && request.method === 'GET')) return Response.json({ message: 'Not found' }, { status: 404 });
     const authorization = request.headers.get('Authorization') || '';
     const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
     if (!(env.API_KEY && token === env.API_KEY) && !await isValidKey(env.DB, token, env.ADMIN_EMAIL)) return Response.json({ message: 'Unauthorized' }, { status: 401 });
     if (url.pathname === '/mcp') return handleMcp(request, env);
+    if (request.method === 'GET') return readHistory(request, env);
     let data: unknown;
     try { data = await request.json(); } catch { return Response.json({ message: 'Invalid JSON' }, { status: 400 }); }
     const email = parseEmail(data);
     if (typeof email === 'string') return Response.json({ message: email }, { status: 400 });
     try {
-      const result = await env.EMAIL.send(email);
-      return Response.json({ id: result.messageId });
-    } catch { return Response.json({ message: 'Email could not be sent. Check the sending domain and Cloudflare configuration.' }, { status: 502 }); }
+      const result = await sendRecordedEmail(env, email);
+      return Response.json(result);
+    } catch { return Response.json({ message: 'Email could not be confirmed. Check history before retrying; delivery may be uncertain.' }, { status: 502 }); }
   }
 };
