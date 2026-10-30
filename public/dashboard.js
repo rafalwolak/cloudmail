@@ -45,7 +45,7 @@ function setSignedIn(session) {
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) { $('#account').textContent = `Signed in as ${session.user.email}`; if (cloudflareConnected) $('#cloudflare-status').textContent = 'Cloudflare connected. Choose zones to manage sending domains.'; }
-  else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); updateComposeMode(); $('#compose-status').textContent = ''; composeKey = null; composeDirty = false; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; templateGeneration++; templateFilters = {}; $('#template-filter').reset(); $('#template-form').reset(); $('#template-form').hidden = true; $('#template-preview').hidden = true; $('#template-preview-content').replaceChildren(); templateId = null; templateDirty = false; }
+  else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); resetComposeTemplatePicker(); updateComposeMode(); $('#compose-status').textContent = ''; composeKey = null; composeDirty = false; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; templateGeneration++; templateFilters = {}; $('#template-filter').reset(); $('#template-form').reset(); $('#template-form').hidden = true; $('#template-preview').hidden = true; $('#template-preview-content').replaceChildren(); templateId = null; templateDirty = false; }
   if (!session) { inboxGeneration++; inboxFilters = {}; $('#inbox-filter').reset(); historyGeneration++; historyFilters = {}; $('#history-filter').reset(); }
 }
 let cloudflarePage = 1;
@@ -239,8 +239,63 @@ function updateComposeMode() {
   $('#compose-template').required = template;
 }
 $('#compose-mode').addEventListener('change', updateComposeMode);
-$('#compose-form').addEventListener('input', () => { composeKey = null; composeDirty = true; });
-$('#compose-form').addEventListener('change', () => { composeKey = null; composeDirty = true; });
+let composeTemplateCursor = null;
+let composeTemplateQuery = '';
+let composeTemplateGeneration = 0;
+function resetComposeTemplatePicker() {
+  composeTemplateGeneration++; composeTemplateCursor = null; composeTemplateQuery = '';
+  $('#compose-template-picker').hidden = true;
+  $('#compose-browse-templates').setAttribute('aria-expanded', 'false');
+  $('#compose-template-list').replaceChildren(); $('#compose-template-list-status').textContent = '';
+  $('#compose-template-more').hidden = true; $('#compose-template-search').value = '';
+}
+async function loadComposeTemplates(append = false) {
+  const generation = ++composeTemplateGeneration;
+  const params = new URLSearchParams({ status: 'published', limit: '20' });
+  if (!append) composeTemplateQuery = $('#compose-template-search').value.trim();
+  if (composeTemplateQuery) params.set('name', composeTemplateQuery);
+  if (append && composeTemplateCursor) params.set('after', composeTemplateCursor);
+  const status = $('#compose-template-list-status'); status.textContent = 'Loading templates…';
+  const result = await api(`/api/templates?${params}`);
+  if (generation !== composeTemplateGeneration) return;
+  const list = $('#compose-template-list'); if (!append) list.replaceChildren();
+  for (const template of result.data) {
+    const item = document.createElement('li'); const label = document.createElement('span'); label.textContent = template.name;
+    const use = document.createElement('button'); use.type = 'button'; use.className = 'text-button'; use.textContent = 'Use'; use.setAttribute('aria-label', `Use ${template.name}`);
+    use.addEventListener('click', () => {
+      const field = $('#compose-template'); field.value = template.id; field.dispatchEvent(new Event('input', { bubbles: true }));
+      resetComposeTemplatePicker(); field.focus();
+    });
+    item.append(label, use); list.append(item);
+  }
+  composeTemplateCursor = result.data.at(-1)?.id || null;
+  $('#compose-template-more').hidden = !result.has_more;
+  $('#compose-template-more').disabled = $('#compose-template-search').value.trim() !== composeTemplateQuery;
+  status.textContent = list.children.length ? '' : 'No published templates match this search.';
+}
+$('#compose-browse-templates').addEventListener('click', async () => {
+  const picker = $('#compose-template-picker');
+  if (!picker.hidden) { resetComposeTemplatePicker(); return; }
+  picker.hidden = false; $('#compose-browse-templates').setAttribute('aria-expanded', 'true');
+  try { await loadComposeTemplates(); } catch (error) { $('#compose-template-list-status').textContent = error.message; }
+});
+$('#compose-template-search').addEventListener('input', event => {
+  $('#compose-template-more').disabled = event.target.value.trim() !== composeTemplateQuery;
+});
+$('#compose-template-search').addEventListener('keydown', event => {
+  if (event.key === 'Enter') { event.preventDefault(); $('#compose-template-search-button').click(); }
+});
+$('#compose-template-search-button').addEventListener('click', async () => {
+  try { await loadComposeTemplates(); } catch (error) { $('#compose-template-list-status').textContent = error.message; }
+});
+$('#compose-template-more').addEventListener('click', async event => {
+  event.currentTarget.disabled = true;
+  try { await loadComposeTemplates(true); } catch (error) { $('#compose-template-list-status').textContent = error.message; }
+  finally { event.currentTarget.disabled = false; }
+});
+
+$('#compose-form').addEventListener('input', event => { if (!event.target.closest('#compose-template-picker')) { composeKey = null; composeDirty = true; } });
+$('#compose-form').addEventListener('change', event => { if (!event.target.closest('#compose-template-picker')) { composeKey = null; composeDirty = true; } });
 $('#compose-form').addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.currentTarget; const fields = $('#compose-fields'); const message = $('#compose-status');
@@ -270,7 +325,7 @@ $('#compose-form').addEventListener('submit', async event => {
       const reader = new FileReader(); reader.onerror = () => reject(new Error('Could not read attachment.')); reader.onload = () => resolve({ filename: file.name, content: String(reader.result).split(',')[1], content_type: file.type || 'application/octet-stream' }); reader.readAsDataURL(file);
     })));
     const result = await api('/api/send', { method: 'POST', headers: { 'Idempotency-Key': composeKey }, body: JSON.stringify(payload) });
-    form.reset(); updateComposeMode(); composeKey = null; composeDirty = false; message.textContent = schedule ? `Scheduled for ${schedule.toLocaleString()}. Email ID: ${result.id}. Delivery is not yet confirmed.` : `Accepted by Cloudflare. Email ID: ${result.id}. Delivery is not yet confirmed.`;
+    form.reset(); resetComposeTemplatePicker(); updateComposeMode(); composeKey = null; composeDirty = false; message.textContent = schedule ? `Scheduled for ${schedule.toLocaleString()}. Email ID: ${result.id}. Delivery is not yet confirmed.` : `Accepted by Cloudflare. Email ID: ${result.id}. Delivery is not yet confirmed.`;
     try { await loadHistory(true); } catch { /* The email was accepted even if the history refresh fails. */ }
   } catch (error) { message.textContent = `${error.message} Check history before trying again; sending may be uncertain.`; }
   finally { fields.disabled = false; }
