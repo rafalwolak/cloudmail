@@ -24,11 +24,12 @@ function setSignedIn(session) {
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) { $('#account').textContent = `Signed in as ${session.user.email}`; if (cloudflareConnected) $('#cloudflare-status').textContent = 'Cloudflare connected. Choose zones to manage sending domains.'; }
-  else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); $('#compose-status').textContent = ''; composeKey = null; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
+  else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); $('#compose-status').textContent = ''; composeKey = null; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
 }
 let cloudflarePage = 1;
 async function loadCloudflareStatus() {
   const result = await api('/api/cloudflare/oauth/status');
+  $('#cloudflare-disconnect').hidden = !result.connected;
   if (cloudflareResult === 'denied') $('#cloudflare-status').textContent = 'Cloudflare authorization was not completed. You can try again.';
   else if (result.connected) $('#cloudflare-status').textContent = 'Cloudflare connection saved. Choose zones to check access and manage sending domains.';
   else $('#cloudflare-status').textContent = result.configured ? 'Cloudflare is not connected yet.' : 'Cloudflare connection is not available for this installation yet.';
@@ -58,6 +59,16 @@ $('#cloudflare-connect').addEventListener('click', async event => {
     if (url.origin !== 'https://dash.cloudflare.com' || url.pathname !== '/oauth2/auth') throw new Error('Invalid Cloudflare authorization URL.');
     location.assign(url.toString());
   } catch (error) { $('#cloudflare-status').textContent = error.message; event.currentTarget.disabled = false; }
+});
+$('#cloudflare-disconnect').addEventListener('click', async event => {
+  if (!window.confirm('Disconnect Cloudflare? Cloudmail will revoke its access and forget selected zones. Sending configuration in Cloudflare remains unchanged.')) return;
+  event.currentTarget.disabled = true; $('#cloudflare-status').textContent = 'Disconnecting Cloudflare…';
+  try {
+    await api('/api/cloudflare/oauth/disconnect', { method: 'POST', body: '{}' });
+    cloudflareGeneration++; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null;
+    await loadSelectedCloudflareZones(); await loadCloudflareStatus(); $('#cloudflare-status').textContent = 'Cloudflare disconnected.';
+  } catch (error) { $('#cloudflare-status').textContent = error.message; }
+  finally { event.currentTarget.disabled = false; }
 });
 $('#cloudflare-load-zones').addEventListener('click', async event => {
   event.currentTarget.disabled = true; $('#cloudflare-status').textContent = 'Loading zones…';

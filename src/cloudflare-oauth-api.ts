@@ -1,6 +1,7 @@
 import { startCloudflareAuthorization } from './cloudflare-oauth-start.ts';
 import { completeCloudflareAuthorization } from './cloudflare-oauth-token.ts';
 import { consumeCloudflareOAuthState } from './cloudflare-oauth-state.ts';
+import { disconnectCloudflare } from './cloudflare-oauth-disconnect.ts';
 
 export async function handleCloudflareOAuth(request: Request, env: { DB: D1Database; BETTER_AUTH_SECRET: string; BETTER_AUTH_URL: string; CLOUDFLARE_OAUTH_CLIENT_ID?: string }, userId: string, sessionId: string): Promise<Response> {
   const url = new URL(request.url);
@@ -11,6 +12,10 @@ export async function handleCloudflareOAuth(request: Request, env: { DB: D1Datab
   }
   if (!env.CLOUDFLARE_OAUTH_CLIENT_ID) return json({ message: 'Cloudflare integration is not configured' }, 503);
   const redirectUri = new URL('/api/cloudflare/oauth/callback', env.BETTER_AUTH_URL).toString();
+  if (url.pathname === '/api/cloudflare/oauth/disconnect' && request.method === 'POST') {
+    try { await disconnectCloudflare(env.DB, env.BETTER_AUTH_SECRET, userId, env.CLOUDFLARE_OAUTH_CLIENT_ID); return json({ disconnected: true }); }
+    catch { return json({ message: 'Cloudflare revocation could not be confirmed. Check authorized applications in Cloudflare.' }, 502); }
+  }
   if (url.pathname === '/api/cloudflare/oauth/start' && request.method === 'POST') {
     try {
       const authorizationUrl = await startCloudflareAuthorization(env.DB, userId, sessionId, { clientId: env.CLOUDFLARE_OAUTH_CLIENT_ID, redirectUri, scopes: ['dns.write', 'zone.read', 'email-sending.read', 'email-sending.write'] });

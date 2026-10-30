@@ -63,6 +63,7 @@ export async function getDomain(request: Request, env: { DB: D1Database; BETTER_
   const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'cache-control': 'no-store' } });
   const url = new URL(request.url); const match = url.pathname.match(/^\/domains\/([a-f0-9]{32})$/i);
   if (!match) return json({ message: 'Not found' }, 404);
+  const id = match[1].toLowerCase();
   if (url.search) return json({ message: 'Unsupported query parameter' }, 400);
   if (!env.CLOUDFLARE_OAUTH_CLIENT_ID) return json({ message: 'Cloudflare domain management is not configured' }, 503);
   const zones = await listSelectedCloudflareZones(env.DB, userId);
@@ -72,16 +73,16 @@ export async function getDomain(request: Request, env: { DB: D1Database; BETTER_
     const { accessToken } = await refreshStoredCloudflareTokens(env.DB, env.BETTER_AUTH_SECRET, userId, env.CLOUDFLARE_OAUTH_CLIENT_ID);
     let found: { zoneId: string; domain: { tag: string; name: string; enabled: boolean; created?: string } } | undefined;
     for (const zone of zones) {
-      const response = await manageDomains(new Request(`https://cloudmail.invalid/domains/${match[1]}`), { zoneId: zone.id, accessToken });
+      const response = await manageDomains(new Request(`https://cloudmail.invalid/domains/${id}`), { zoneId: zone.id, accessToken });
       if (response.status === 404) continue;
       if (!response.ok) return json({ message: 'Cloudflare domain could not be retrieved' }, 502);
       const data = (await response.json() as { data?: unknown }).data;
-      if (!data || typeof data !== 'object' || !('tag' in data) || typeof data.tag !== 'string' || data.tag.toLowerCase() !== match[1].toLowerCase() || !('name' in data) || typeof data.name !== 'string' || !('enabled' in data) || typeof data.enabled !== 'boolean') return json({ message: 'Invalid Cloudflare domain response' }, 502);
+      if (!data || typeof data !== 'object' || !('tag' in data) || typeof data.tag !== 'string' || data.tag.toLowerCase() !== id || !('name' in data) || typeof data.name !== 'string' || !('enabled' in data) || typeof data.enabled !== 'boolean') return json({ message: 'Invalid Cloudflare domain response' }, 502);
       if (found) return json({ message: 'Cloudflare domain identifier is ambiguous' }, 502);
       found = { zoneId: zone.id, domain: data as { tag: string; name: string; enabled: boolean; created?: string } };
     }
     if (!found) return json({ message: 'Domain not found' }, 404);
-    const dns = await manageDomains(new Request(`https://cloudmail.invalid/domains/${match[1]}/dns`), { zoneId: found.zoneId, accessToken });
+    const dns = await manageDomains(new Request(`https://cloudmail.invalid/domains/${id}/dns`), { zoneId: found.zoneId, accessToken });
     if (!dns.ok) return json({ message: 'Cloudflare DNS records could not be retrieved' }, 502);
     const records = await dns.json() as { data?: unknown; result_info?: { total_pages?: number } };
     if (!Array.isArray(records.data)) return json({ message: 'Invalid Cloudflare DNS response' }, 502);

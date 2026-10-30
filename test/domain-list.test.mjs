@@ -1,8 +1,8 @@
+import { saveCloudflareOAuthTokens } from './cloudflare-oauth-fixture.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFile } from 'node:fs/promises';
-import { saveCloudflareOAuthTokens } from '../src/cloudflare-oauth-connection.ts';
 import { createDomain, deleteDomain, getDomain, listDomains } from '../src/domain-list.ts';
 
 test('domain list reads selected zones without claiming DNS verification', async () => {
@@ -41,7 +41,7 @@ test('domain list reads selected zones without claiming DNS verification', async
       return Response.json({ success: true, result: { tag, name: 'example.com', enabled: true } });
     };
     const get = () => new Request(`https://example.test/domains/${tag}`);
-    const found = await getDomain(get(), env, 'admin'); const detail = await found.json();
+    const found = await getDomain(new Request(`https://example.test/domains/${tag.toUpperCase()}`), env, 'admin'); const detail = await found.json();
     assert.equal(found.status, 200); assert.equal(detail.status, 'unknown'); assert.equal(detail.records_incomplete, true); assert.equal(detail.records[0].type, 'TXT');
     globalThis.fetch = async () => Response.json({ success: true, result: { tag, name: 'example.com', enabled: true } });
     assert.equal((await getDomain(get(), env, 'admin')).status, 502);

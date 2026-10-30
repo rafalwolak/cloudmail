@@ -1,8 +1,8 @@
+import { saveCloudflareOAuthTokens } from './cloudflare-oauth-fixture.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFile } from 'node:fs/promises';
-import { saveCloudflareOAuthTokens } from '../src/cloudflare-oauth-connection.ts';
 import { handleCloudflareZones } from '../src/cloudflare-zone-api.ts';
 
 test('zone API lists and selects only Cloudflare-verified zones', async () => {

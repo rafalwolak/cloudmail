@@ -12,6 +12,6 @@ export async function manageSelectedZoneDomains(request: Request, env: { DB: D1D
   let accessToken: string;
   try { ({ accessToken } = await refreshStoredCloudflareTokens(env.DB, env.BETTER_AUTH_SECRET, userId, env.CLOUDFLARE_OAUTH_CLIENT_ID)); }
   catch { return Response.json({ message: 'Cloudflare connection is unavailable; reconnect or retry' }, { status: 503 }); }
-  url.pathname = `/domains${match[2] ? `/${match[2]}${match[3] ?? ''}` : ''}`;
+  url.pathname = `/domains${match[2] ? `/${match[2].toLowerCase()}${match[3]?.toLowerCase() ?? ''}` : ''}`;
   return manageDomains(new Request(url, request), { zoneId, accessToken });
 }

@@ -27,17 +27,13 @@ export async function encryptCloudflareOAuthTokens(secret: string, userId: strin
   return `v1.${encode(iv)}.${encode(new Uint8Array(ciphertext))}`;
 }
 
-export async function saveCloudflareOAuthTokens(db: D1Database, secret: string, userId: string, tokens: CloudflareOAuthTokens): Promise<void> {
+export async function replaceCloudflareOAuthConnection(db: D1Database, secret: string, userId: string, tokens: CloudflareOAuthTokens, now = Date.now()): Promise<void> {
   const envelope = await encryptCloudflareOAuthTokens(secret, userId, tokens);
-  await db.prepare('INSERT INTO cloudflare_oauth_connections (user_id, ciphertext) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET ciphertext = excluded.ciphertext, refresh_owner = NULL, refresh_until = NULL').bind(userId, envelope).run();
-}
-
-export async function replaceCloudflareOAuthConnection(db: D1Database, secret: string, userId: string, tokens: CloudflareOAuthTokens): Promise<void> {
-  const envelope = await encryptCloudflareOAuthTokens(secret, userId, tokens);
-  await db.batch([
-    db.prepare('INSERT INTO cloudflare_oauth_connections (user_id, ciphertext) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET ciphertext = excluded.ciphertext, refresh_owner = NULL, refresh_until = NULL').bind(userId, envelope),
-    db.prepare('DELETE FROM cloudflare_zones WHERE user_id = ?').bind(userId),
+  const result = await db.batch([
+    db.prepare('INSERT INTO cloudflare_oauth_connections (user_id, ciphertext) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET ciphertext = excluded.ciphertext, refresh_owner = NULL, refresh_until = NULL WHERE refresh_owner IS NULL OR refresh_until <= ?').bind(userId, envelope, now),
+    db.prepare('DELETE FROM cloudflare_zones WHERE user_id = ? AND EXISTS (SELECT 1 FROM cloudflare_oauth_connections WHERE user_id = ? AND ciphertext = ?)').bind(userId, userId, envelope),
   ]);
+  if (!result[0].meta.changes) throw new Error('Cloudflare connection is busy');
 }
 
 export async function readCloudflareOAuthTokens(db: D1Database, secret: string, userId: string): Promise<CloudflareOAuthTokens | null> {

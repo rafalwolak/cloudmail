@@ -1,16 +1,17 @@
+import { saveCloudflareOAuthTokens } from './cloudflare-oauth-fixture.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFile } from 'node:fs/promises';
 import { createCloudflareOAuthState } from '../src/cloudflare-oauth-state.ts';
-import { readCloudflareOAuthTokens, saveCloudflareOAuthTokens } from '../src/cloudflare-oauth-connection.ts';
+import { readCloudflareOAuthTokens } from '../src/cloudflare-oauth-connection.ts';
 import { completeCloudflareAuthorization, refreshCloudflareTokens, refreshStoredCloudflareTokens } from '../src/cloudflare-oauth-token.ts';
 
 async function database() {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec('CREATE TABLE "user" (id TEXT PRIMARY KEY); INSERT INTO "user" VALUES (\'admin\');');
   for (const file of ['0025_cloudflare_oauth_states.sql', '0026_cloudflare_oauth_connection.sql', '0027_cloudflare_zones.sql', '0028_cloudflare_oauth_session.sql']) sqlite.exec(await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8'));
-  return { sqlite, async batch(statements) { sqlite.exec('BEGIN'); try { for (const statement of statements) await statement.run(); sqlite.exec('COMMIT'); } catch (error) { sqlite.exec('ROLLBACK'); throw error; } }, prepare(sql) { return { bind(...args) { return { async run() { const result = sqlite.prepare(sql).run(...args); return { meta: { changes: Number(result.changes) } }; }, async first() { return sqlite.prepare(sql).get(...args) ?? null; } }; } }; } };
+  return { sqlite, async batch(statements) { sqlite.exec('BEGIN'); try { const results = []; for (const statement of statements) results.push(await statement.run()); sqlite.exec('COMMIT'); return results; } catch (error) { sqlite.exec('ROLLBACK'); throw error; } }, prepare(sql) { return { bind(...args) { return { async run() { const result = sqlite.prepare(sql).run(...args); return { meta: { changes: Number(result.changes) } }; }, async first() { return sqlite.prepare(sql).get(...args) ?? null; } }; } }; } };
 }
 
 test('authorization code exchange consumes state and stores encrypted credentials', async () => {

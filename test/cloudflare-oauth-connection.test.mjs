@@ -1,8 +1,9 @@
+import { saveCloudflareOAuthTokens } from './cloudflare-oauth-fixture.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFile } from 'node:fs/promises';
-import { saveCloudflareOAuthTokens, readCloudflareOAuthTokens } from '../src/cloudflare-oauth-connection.ts';
+import { readCloudflareOAuthTokens } from '../src/cloudflare-oauth-connection.ts';
 
 async function database() {
   const sqlite = new DatabaseSync(':memory:');

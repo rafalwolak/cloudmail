@@ -25,7 +25,7 @@
         <section aria-labelledby="domains-title" class="history">
           <h3 id="domains-title">Cloudflare sending domains</h3>
           <p>Connect Cloudflare to select zones and manage their sending domains. Cloudflare will show the requested permissions before you authorize access.</p>
-          <button id="cloudflare-connect" type="button" class="secondary">Connect Cloudflare</button>
+          <button id="cloudflare-connect" type="button" class="secondary">Connect Cloudflare</button><button id="cloudflare-disconnect" type="button" class="secondary" hidden>Disconnect Cloudflare</button>
           <button id="cloudflare-load-zones" type="button" class="secondary">Choose zones</button>
           <p id="cloudflare-status" role="status" aria-live="polite"></p>
           <form id="cloudflare-zone-form" hidden><label for="cloudflare-zone">Available zones</label><select id="cloudflare-zone" required></select><button type="submit">Add zone</button><button id="cloudflare-next-page" class="secondary" type="button" hidden>Load more zones</button></form>

@@ -151,6 +151,7 @@ test('dashboard webhooks require an administrator and reject cross-origin change
 test('Cloudflare integration endpoints require an administrator session', async () => {
   for (const [path, method] of [
     ['/api/cloudflare/oauth/start', 'POST'],
+    ['/api/cloudflare/oauth/disconnect', 'POST'],
     ['/api/cloudflare/oauth/callback?state=invalid&code=invalid', 'GET'],
     ['/api/cloudflare/zones', 'GET'],
     ['/api/cloudflare/zones', 'POST'],

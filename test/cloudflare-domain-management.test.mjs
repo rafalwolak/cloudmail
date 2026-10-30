@@ -1,8 +1,8 @@
+import { saveCloudflareOAuthTokens } from './cloudflare-oauth-fixture.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFile } from 'node:fs/promises';
-import { saveCloudflareOAuthTokens } from '../src/cloudflare-oauth-connection.ts';
 import { manageSelectedZoneDomains } from '../src/cloudflare-domain-management.ts';
 
 async function database() {
@@ -25,6 +25,10 @@ test('domain operations require an administrator-selected zone and use its OAuth
     assert.equal(calls, 0);
     assert.equal((await manageSelectedZoneDomains(request(), env, 'admin')).status, 200);
     assert.equal(calls, 1);
+    const tag = 'b'.repeat(32);
+    globalThis.fetch = async (url) => { assert.ok(url.endsWith(`/subdomains/${tag}/dns`)); return Response.json({ success: true, result: [] }); };
+    const uppercase = new Request(`https://example.com/api/cloudflare/zones/${zone.toUpperCase()}/domains/${tag.toUpperCase()}/DNS`);
+    assert.equal((await manageSelectedZoneDomains(uppercase, env, 'admin')).status, 200);
     assert.equal((await manageSelectedZoneDomains(request(), { ...env, CLOUDFLARE_OAUTH_CLIENT_ID: '' }, 'admin')).status, 503);
   } finally { globalThis.fetch = original; db.sqlite.close(); }
 });
