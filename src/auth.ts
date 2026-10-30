@@ -1,5 +1,6 @@
 import type { OutboundEmail } from './email';
 import { betterAuth } from 'better-auth';
+import { sendRecordedEmail } from './history';
 
 export interface AuthEnv {
   DB: D1Database;
@@ -21,14 +22,14 @@ export function createAuth(env: AuthEnv) {
       requireEmailVerification: true,
       sendResetPassword: async ({ user, url }) => {
         if (!env.AUTH_EMAIL_FROM) throw new Error('Authentication sender is not configured');
-        await env.EMAIL.send({ from: env.AUTH_EMAIL_FROM, to: user.email, subject: 'Reset your Cloudmail password', text: `Reset your password using this link: ${url}` });
+        await sendRecordedEmail(env, { from: env.AUTH_EMAIL_FROM, to: user.email, subject: 'Reset your Cloudmail password', text: `Reset your password using this link: ${url}` });
       },
     },
     emailVerification: {
       sendOnSignUp: true,
       sendVerificationEmail: async ({ user, url }) => {
         if (!env.AUTH_EMAIL_FROM) throw new Error('Authentication sender is not configured');
-        await env.EMAIL.send({ from: env.AUTH_EMAIL_FROM, to: user.email, subject: 'Verify your Cloudmail email', text: `Verify your email using this link: ${url}` });
+        await sendRecordedEmail(env, { from: env.AUTH_EMAIL_FROM, to: user.email, subject: 'Verify your Cloudmail email', text: `Verify your email using this link: ${url}` });
       },
     },
   });

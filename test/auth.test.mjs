@@ -27,6 +27,8 @@ test('an unverified user cannot sign in after registration', { skip: process.env
     method: 'POST', headers, body: JSON.stringify({ name: 'Test', email, password }),
   });
   assert.equal(signup.status, 200, await signup.clone().text());
+  const history = await fetch(`${base}/emails?limit=100`, { headers: { authorization: `Bearer ${process.env.TEST_API_KEY || 'local-test-key'}` } });
+  assert.ok((await history.json()).data.some(item => item.to.includes(email) && item.subject === 'Verify your Cloudmail email'));
   const signin = await fetch(`${base}/api/auth/sign-in/email`, {
     method: 'POST', headers, body: JSON.stringify({ email, password }),
   });

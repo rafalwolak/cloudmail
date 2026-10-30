@@ -6,12 +6,12 @@ An early-stage, self-hosted transactional email service on Cloudflare Workers. T
 
 ## Current capabilities
 
-- `POST /emails` accepts `from`, `to`, `subject`, and `text` or `html` with a bearer API key. An optional `Idempotency-Key` prevents duplicate sends for 24 hours. Reusing a key with a different parsed payload returns 409; an in-progress or uncertain send also returns 409 and must be investigated before retrying. The MCP tool does not yet expose idempotency keys.
+- `POST /emails` accepts `from`, `to`, `subject`, and `text` or `html` with a bearer API key. An optional `Idempotency-Key` prevents duplicate sends for 24 hours. Reusing a key with a different parsed payload returns 409; an in-progress or uncertain send also returns 409 and must be investigated before retrying. The MCP `send_email` tool accepts the same value as `idempotency_key`.
 - Supports one or more `to`, `cc`, and `bcc` recipients (up to 50 total), a single `reply_to` address, custom `headers`, and base64 attachments with optional `content_type` and inline `content_id`. Remote attachment URLs are not supported. Unsupported fields are rejected. Other Resend API features are not implemented.
 - `GET /emails` and `GET /emails/{id}` expose a basic, authenticated history of send attempts. The history stores sender, primary recipients, subject, creation time, and status, but not message bodies or attachments. `accepted` means accepted by Cloudflare, not delivered. A `pending` or `unknown` status requires investigation before retrying. Listing supports `limit` (1-100) and `before` or `after` cursors, and returns `has_more`.
 - A stateless MCP endpoint at `/mcp` exposes `send_email`, `list_emails`, and `get_email` tools over Streamable HTTP, using the same bearer API key as `/emails`.
 - Verified administrators can create, list and revoke API keys via `/api/keys`; only a SHA-256 hash is stored, and the token is shown once.
-- Better Auth provides email/password authentication backed by D1. Sign-up is disabled by default and requires a verified sending domain.
+- Better Auth provides email/password authentication backed by D1; verification and password-reset messages use the same recorded Cloudmail sending path. Sign-up is disabled by default and requires a verified sending domain.
 
 ## Deploy
 

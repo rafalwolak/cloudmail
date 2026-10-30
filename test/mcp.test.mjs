@@ -30,6 +30,11 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     assert.equal(JSON.parse(retrieved.content[0].text).id, id);
     const listed = await client.callTool({ name: 'list_emails', arguments: { limit: 10 } });
     assert.ok(JSON.parse(listed.content[0].text).data.some(item => item.id === id));
+    const idemArgs = { from: 'sender@example.com', to: 'recipient@example.com', subject: 'MCP idempotency', text: 'Hello', idempotency_key: crypto.randomUUID() };
+    const first = await client.callTool({ name: 'send_email', arguments: idemArgs });
+    const again = await client.callTool({ name: 'send_email', arguments: idemArgs });
+    assert.notEqual(first.isError, true);
+    assert.equal(JSON.parse(first.content[0].text).id, JSON.parse(again.content[0].text).id);
     const invalid = await client.callTool({ name: 'send_email', arguments: { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Test', text: 'Hello', scheduled_at: '2027-01-01' } });
     assert.equal(invalid.isError, true);
   } finally { await client.close(); }

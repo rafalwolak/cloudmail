@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
 import { parseEmail } from './email';
-import { readHistory, sendRecordedEmail } from './history';
+import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
 import type { AuthEnv } from './auth';
 
 const addresses = z.union([z.string(), z.array(z.string())]);
@@ -16,16 +16,19 @@ export async function handleMcp(request: Request, env: AuthEnv): Promise<Respons
     inputSchema: z.object({
       from: z.string(), to: addresses, subject: z.string(), text: z.string().optional(), html: z.string().optional(),
       cc: addresses.optional(), bcc: addresses.optional(), reply_to: z.string().optional(), headers: z.record(z.string(), z.string()).optional(),
+      idempotency_key: z.string().min(1).max(256).optional(),
       attachments: z.array(z.object({ filename: z.string(), content: z.string(), content_type: z.string().optional(), content_id: z.string().optional() }).strict()).optional(),
     }).strict(),
     annotations: { destructiveHint: false, readOnlyHint: false, idempotentHint: false, openWorldHint: true },
   }, async args => {
-    const email = parseEmail(args);
+    const { idempotency_key, ...payload } = args;
+    const email = parseEmail(payload);
     if (typeof email === 'string') return { isError: true, content: [{ type: 'text', text: email }] };
     try {
-      const result = await sendRecordedEmail(env, email);
+      const result = await sendRecordedEmail(env, email, idempotency_key);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-    } catch {
+    } catch (error) {
+      if (error instanceof IdempotencyConflict) return { isError: true, content: [{ type: 'text', text: error.code }] };
       return { isError: true, content: [{ type: 'text', text: 'Email could not be confirmed. Check history before retrying; delivery may be uncertain.' }] };
     }
   });
