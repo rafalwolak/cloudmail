@@ -21,8 +21,23 @@ function setSignedIn(session) {
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) $('#account').textContent = `Signed in as ${session.user.email}`;
-  else { $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
+  else { $('#compose-form').reset(); $('#compose-status').textContent = ''; composeKey = null; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
 }
+let composeKey = null;
+$('#compose-form').addEventListener('input', () => { composeKey = null; });
+$('#compose-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = event.currentTarget; const button = form.querySelector('button'); const message = $('#compose-status');
+  const payload = { from: $('#compose-from').value.trim(), to: $('#compose-to').value.trim(), subject: $('#compose-subject').value, text: $('#compose-text').value };
+  if (!window.confirm(`Send this transactional email to ${payload.to}?`)) return;
+  composeKey ??= crypto.randomUUID(); button.disabled = true; message.textContent = 'Sending…';
+  try {
+    const result = await api('/api/send', { method: 'POST', headers: { 'Idempotency-Key': composeKey }, body: JSON.stringify(payload) });
+    form.reset(); composeKey = null; message.textContent = `Accepted by Cloudflare. Email ID: ${result.id}. Delivery is not yet confirmed.`;
+    try { await loadHistory(true); } catch { /* The email was accepted even if the history refresh fails. */ }
+  } catch (error) { message.textContent = `${error.message} Check history before trying again; sending may be uncertain.`; }
+  finally { button.disabled = false; }
+});
 let metricsGeneration = 0;
 $('#metrics-form').addEventListener('submit', async event => {
   event.preventDefault();

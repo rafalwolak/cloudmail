@@ -29,6 +29,21 @@ test('dashboard email history requires a session', async () => {
   assert.match(html, /id="metrics-status" role="status"/);
 });
 
+test('dashboard send requires an administrator and trusted origin', { skip: !process.env.TEST_DASHBOARD_ADMIN }, async () => {
+  const path = `${base}/api/send`;
+  const message = { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Dashboard send', text: 'Local test' };
+  const data = JSON.stringify(message);
+  assert.equal((await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: data })).status, 401);
+  const auth = await fetch(`${base}/api/auth/sign-in/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ email: process.env.TEST_DASHBOARD_ADMIN, password: process.env.TEST_DASHBOARD_PASSWORD }) });
+  const cookie = auth.headers.get('set-cookie').split(';')[0];
+  const headers = { cookie, origin: base, 'content-type': 'application/json', 'Idempotency-Key': crypto.randomUUID() };
+  assert.equal((await fetch(path, { method: 'POST', headers: { ...headers, origin: 'https://attacker.example' }, body: data })).status, 403);
+  const first = await fetch(path, { method: 'POST', headers, body: data });
+  assert.equal(first.status, 200);
+  const second = await fetch(path, { method: 'POST', headers, body: data });
+  assert.deepEqual(await first.json(), await second.json());
+});
+
 test('verified administrator can read history with a session', { skip: !process.env.TEST_DASHBOARD_ADMIN }, async () => {
   const response = await fetch(`${base}/api/auth/sign-in/email`, {
     method: 'POST', headers: { 'content-type': 'application/json', origin: base },
