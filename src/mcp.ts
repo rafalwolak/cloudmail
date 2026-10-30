@@ -9,7 +9,7 @@ import type { AuthEnv } from './auth';
 
 const addresses = z.union([z.string(), z.array(z.string())]);
 
-export async function handleMcp(request: Request, env: AuthEnv): Promise<Response> {
+export async function handleMcp(request: Request, env: AuthEnv, permission: 'full_access' | 'sending_access'): Promise<Response> {
   const origin = request.headers.get('origin');
   if (origin && origin !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
   const server = new McpServer({ name: 'cloudmail', version: '0.1.0' });
@@ -40,6 +40,7 @@ export async function handleMcp(request: Request, env: AuthEnv): Promise<Respons
       return { isError: true, content: [{ type: 'text', text: 'Email could not be confirmed. Check history before retrying; delivery may be uncertain.' }] };
     }
   });
+  if (permission === 'full_access') {
   const historyTool = async (path: string) => {
     const response = await readHistory(new Request(new URL(path, env.BETTER_AUTH_URL)), env);
     const body = await response.json();
@@ -119,6 +120,7 @@ export async function handleMcp(request: Request, env: AuthEnv): Promise<Respons
   server.registerTool('delete_template', {
     description: 'Permanently delete a template and its published snapshot.', inputSchema: z.object({ id: z.string().regex(/^[a-z0-9_-]{1,64}$/) }).strict(), annotations: mutating,
   }, async ({ id }) => templateTool(`/templates/${id}`, 'DELETE'));
+  }
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
   return transport.handleRequest(request);

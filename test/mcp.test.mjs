@@ -33,7 +33,7 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     assert.notEqual(events.isError, true);
     assert.ok(Array.isArray(JSON.parse(events.content[0].text).data));
     assert.deepEqual(JSON.parse(retrieved.content[0].text).tags, [{ name: 'source', value: 'mcp' }]);
-    const listed = await client.callTool({ name: 'list_emails', arguments: { limit: 10 } });
+    const listed = await client.callTool({ name: 'list_emails', arguments: { limit: 100 } });
     assert.ok(JSON.parse(listed.content[0].text).data.some(item => item.id === id));
     const idemArgs = { from: 'sender@example.com', to: 'recipient@example.com', subject: 'MCP idempotency', text: 'Hello', idempotency_key: crypto.randomUUID() };
     const first = await client.callTool({ name: 'send_email', arguments: idemArgs });

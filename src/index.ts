@@ -60,8 +60,8 @@ export default {
     const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
     const permission = env.API_KEY && token === env.API_KEY ? 'full_access' : await keyPermission(env.DB, token, env.ADMIN_EMAIL);
     if (!permission) return Response.json({ message: 'Unauthorized' }, { status: 401 });
-    if (permission === 'sending_access' && !(request.method === 'POST' && (url.pathname === '/emails' || url.pathname === '/emails/batch'))) return Response.json({ message: 'Forbidden' }, { status: 403 });
-    if (url.pathname === '/mcp') return handleMcp(request, env);
+    if (permission === 'sending_access' && url.pathname !== '/mcp' && !(request.method === 'POST' && (url.pathname === '/emails' || url.pathname === '/emails/batch'))) return Response.json({ message: 'Forbidden' }, { status: 403 });
+    if (url.pathname === '/mcp') return handleMcp(request, env, permission);
     if (url.pathname === '/templates' || url.pathname.startsWith('/templates/')) return handleTemplates(request, env);
     if (url.pathname === '/emails/batch' && request.method === 'POST') return sendBatch(request, env);
     if (request.method === 'GET') return readHistory(request, env);

@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:8787';
 
@@ -64,8 +66,21 @@ test('sending-only keys cannot read data or manage resources', { skip: !process.
     const body = { from: 'a@example.com', to: 'b@example.com', subject: 'Hi', text: 'Hi' };
     assert.equal((await fetch(`${base}/emails`, { method: 'POST', headers: keyHeaders, body: JSON.stringify(body) })).status, 200);
     assert.equal((await fetch(`${base}/emails/batch`, { method: 'POST', headers: keyHeaders, body: JSON.stringify([body]) })).status, 200);
-    for (const path of ['/emails', '/templates', '/mcp']) assert.equal((await fetch(`${base}${path}`, { headers: keyHeaders })).status, 403);
+    for (const path of ['/emails', '/templates']) assert.equal((await fetch(`${base}${path}`, { headers: keyHeaders })).status, 403);
     assert.equal((await fetch(`${base}/templates`, { method: 'POST', headers: keyHeaders, body: '{}' })).status, 403);
-    assert.equal((await fetch(`${base}/mcp`, { method: 'POST', headers: keyHeaders, body: '{}' })).status, 403);
+    const client = new Client({ name: 'limited-test', version: '1.0.0' });
+    try {
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { authorization: `Bearer ${token}` } } }));
+      const tools = await client.listTools();
+      assert.deepEqual(tools.tools.map(tool => tool.name), ['send_email']);
+      const sent = await client.callTool({ name: 'send_email', arguments: body });
+      assert.notEqual(sent.isError, true);
+      for (const name of ['list_emails', 'get_email', 'create_template', 'cancel_email']) {
+        try { const result = await client.callTool({ name, arguments: {} }); assert.equal(result.isError, true); }
+        catch (error) { assert.match(String(error), /not found|unknown|not registered/i); }
+      }
+    } finally { await client.close(); }
+    assert.equal((await fetch(`${base}/api/keys/${id}`, { method: 'DELETE', headers: admin })).status, 204);
+    assert.equal((await fetch(`${base}/mcp`, { method: 'POST', headers: keyHeaders, body: '{}' })).status, 401);
   } finally { await fetch(`${base}/api/keys/${id}`, { method: 'DELETE', headers: admin }); }
 });
