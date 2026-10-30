@@ -66,7 +66,7 @@ test('invalid schedules and attempts to cancel sent emails are rejected', async 
 });
 
 test('large scheduled messages use R2 and cleanup after cancellation', { skip: !process.env.TEST_D1_CONFIG }, async () => {
-  const sql = command => JSON.parse(execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--json', '--command', command], { encoding: 'utf8' }))[0].results;
+  const sql = command => JSON.parse(execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, ...(process.env.TEST_D1_PERSIST ? ['--persist-to', process.env.TEST_D1_PERSIST] : []), '--json', '--command', command], { encoding: 'utf8' }))[0].results;
   const scheduled_at = new Date(Date.now() + 600000).toISOString();
   const request = { ...message, scheduled_at, attachments: [{ filename: 'large.txt', content: Buffer.alloc(1600000, 65).toString('base64'), content_type: 'text/plain' }] };
   const key = crypto.randomUUID();
@@ -76,7 +76,7 @@ test('large scheduled messages use R2 and cleanup after cancellation', { skip: !
   const stored = sql(`SELECT payload, payload_r2_key FROM scheduled_emails WHERE id = '${id}'`)[0];
   assert.equal(stored.payload, null);
   assert.equal(stored.payload_r2_key, `scheduled/${id}`);
-  const getObject = () => execFileSync('npx', ['wrangler', 'r2', 'object', 'get', `cloudmail-inbound/scheduled/${id}`, '--local', '--config', process.env.TEST_D1_CONFIG, '--pipe'], { maxBuffer: 4 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+  const getObject = () => execFileSync('npx', ['wrangler', 'r2', 'object', 'get', `cloudmail-inbound/scheduled/${id}`, '--local', '--config', process.env.TEST_D1_CONFIG, ...(process.env.TEST_D1_PERSIST ? ['--persist-to', process.env.TEST_D1_PERSIST] : []), '--pipe'], { maxBuffer: 4 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
   assert.equal(JSON.parse(getObject().toString()).attachments[0].filename, 'large.txt');
   const repeat = await call('/emails', 'POST', request, { 'Idempotency-Key': key });
   assert.equal((await repeat.json()).id, id);
@@ -117,4 +117,21 @@ test('sent scheduled content remains available after the delivery attempt', asyn
   const details = await (await call(`/emails/${id}`)).json();
   assert.equal(details.status, 'accepted');
   assert.equal(details.text, message.text);
+});
+
+test('history exposes preparation backoff and rescheduling clears it', { skip: !process.env.TEST_D1_CONFIG || !process.env.TEST_D1_PERSIST }, async () => {
+  const { execFileSync } = await import('node:child_process');
+  const created = await call('/emails', 'POST', { ...message, scheduled_at: 'in 10 min' });
+  assert.equal(created.status, 200);
+  const { id } = await created.json();
+  const retry = '2030-01-01T00:00:00.000Z';
+  execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--persist-to', process.env.TEST_D1_PERSIST, '--command', `UPDATE scheduled_emails SET prepare_attempts = 3, prepare_after = '${retry}' WHERE id = '${id}'`], { stdio: 'ignore' });
+  const details = await (await call(`/emails/${id}`)).json();
+  assert.equal(details.preparation_attempts, 3);
+  assert.equal(details.preparation_retry_at, retry);
+  assert.equal((await call(`/emails/${id}`, 'PATCH', { scheduled_at: 'in 20 min' })).status, 200);
+  const updated = await (await call(`/emails/${id}`)).json();
+  assert.equal(updated.preparation_attempts, 0);
+  assert.equal(updated.preparation_retry_at, null);
+  assert.equal((await call(`/emails/${id}/cancel`, 'POST', {})).status, 200);
 });

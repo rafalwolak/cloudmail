@@ -59,14 +59,14 @@ export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idem
   return { id };
 }
 
-interface HistoryRow { id: string; sender: string; recipients: string; subject: string; status: string; created_at: string; tags: string; cc: string | null; bcc: string | null; reply_to: string | null; schedule_state: string | null; scheduled_at: string | null; last_event: string | null }
+interface HistoryRow { id: string; sender: string; recipients: string; subject: string; status: string; created_at: string; tags: string; cc: string | null; bcc: string | null; reply_to: string | null; schedule_state: string | null; scheduled_at: string | null; last_event: string | null; prepare_attempts: number | null; prepare_after: string | null }
 function format(row: HistoryRow) {
-  return { id: row.id, from: row.sender, to: JSON.parse(row.recipients), subject: row.subject, status: row.schedule_state ?? row.status, scheduled_at: row.scheduled_at, created_at: row.created_at, tags: JSON.parse(row.tags), cc: row.cc === null ? null : JSON.parse(row.cc), bcc: row.bcc === null ? null : JSON.parse(row.bcc), reply_to: row.reply_to, last_event: row.last_event };
+  return { id: row.id, from: row.sender, to: JSON.parse(row.recipients), subject: row.subject, status: row.schedule_state ?? row.status, scheduled_at: row.scheduled_at, created_at: row.created_at, tags: JSON.parse(row.tags), cc: row.cc === null ? null : JSON.parse(row.cc), bcc: row.bcc === null ? null : JSON.parse(row.bcc), reply_to: row.reply_to, last_event: row.last_event, preparation_attempts: row.schedule_state === 'scheduled' ? row.prepare_attempts : null, preparation_retry_at: row.schedule_state === 'scheduled' ? row.prepare_after : null };
 }
 
 export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2Bucket }): Promise<Response> {
   const url = new URL(request.url);
-  const fields = "email_history.id, sender, recipients, subject, status, created_at, tags, cc, bcc, reply_to, scheduled_emails.state AS schedule_state, scheduled_at, (SELECT type FROM delivery_events WHERE provider_id = email_history.provider_id ORDER BY occurred_at DESC, id DESC LIMIT 1) AS last_event";
+  const fields = "email_history.id, sender, recipients, subject, status, created_at, tags, cc, bcc, reply_to, scheduled_emails.state AS schedule_state, scheduled_at, prepare_attempts, prepare_after, (SELECT type FROM delivery_events WHERE provider_id = email_history.provider_id ORDER BY occurred_at DESC, id DESC LIMIT 1) AS last_event";
   const tables = 'email_history LEFT JOIN scheduled_emails ON scheduled_emails.id = email_history.id';
   if (url.pathname === '/emails') {
     const params = url.searchParams;

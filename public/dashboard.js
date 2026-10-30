@@ -371,6 +371,11 @@ async function loadHistory(reset = false) {
       const when = document.createElement('span');
       when.textContent = `Scheduled for ${new Date(email.scheduled_at).toLocaleString()} (your time zone)`;
       item.append(when);
+      if (email.preparation_retry_at) {
+        const retry = document.createElement('span');
+        retry.textContent = `Preparation failed ${email.preparation_attempts} time(s). Retry after ${new Date(email.preparation_retry_at).toLocaleString()} (your time zone). No send was attempted.`;
+        item.append(retry);
+      }
       const form = document.createElement('form'); form.className = 'schedule-form';
       const label = document.createElement('label'); label.htmlFor = `schedule-${email.id}`; label.textContent = `New send time for ${email.subject}`;
       const input = document.createElement('input'); input.id = label.htmlFor; input.type = 'datetime-local'; input.required = true;

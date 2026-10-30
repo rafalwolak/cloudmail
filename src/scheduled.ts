@@ -62,7 +62,7 @@ export async function manageSchedule(request: Request, env: ScheduleEnv): Promis
     if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'scheduled_at')) return Response.json({ message: 'Invalid schedule' }, { status: 400 });
     const scheduledAt = validateSchedule((body as { scheduled_at?: unknown }).scheduled_at);
     if (!scheduledAt) return Response.json({ message: 'scheduled_at must be a future ISO 8601 time or relative duration within 30 days' }, { status: 400 });
-    result = await env.DB.prepare("UPDATE scheduled_emails SET scheduled_at = ? WHERE id = ? AND state = 'scheduled'").bind(scheduledAt, id).run();
+    result = await env.DB.prepare("UPDATE scheduled_emails SET scheduled_at = ?, prepare_after = NULL, prepare_attempts = 0 WHERE id = ? AND state = 'scheduled'").bind(scheduledAt, id).run();
   } else return Response.json({ message: 'Not found' }, { status: 404 });
   if (!result.meta.changes) {
     const existing = await env.DB.prepare('SELECT id FROM email_history WHERE id = ?').bind(id).first();
