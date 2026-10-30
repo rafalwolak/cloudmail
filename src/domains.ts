@@ -24,6 +24,6 @@ export async function manageDomains(request: Request, authorization: DomainAutho
       return json({ object: 'list', data: result.result, ...(result.result_info && { result_info: result.result_info }) });
     }
     if (request.method === 'DELETE') return json({ id, deleted: true });
-    return json({ object: dns ? 'domain_dns' : 'domain', data: result.result }, request.method === 'POST' ? 201 : 200);
+    return json({ object: dns ? 'domain_dns' : 'domain', data: result.result, ...(dns && result.result_info && { result_info: result.result_info }) }, request.method === 'POST' ? 201 : 200);
   } catch { return json({ message: 'Cloudflare domain request could not be confirmed' }, 502); }
 }

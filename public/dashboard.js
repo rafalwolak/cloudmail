@@ -81,7 +81,37 @@ async function loadCloudflareDomains() {
   const list = $('#cloudflare-domain-list'); list.replaceChildren();
   if (!Array.isArray(result.data)) throw new Error('Unexpected Cloudflare domain response.');
   if (!result.data.length) { const item = document.createElement('li'); item.textContent = 'No sending domains configured in this zone.'; list.append(item); }
-  for (const domain of result.data) { const item = document.createElement('li'); item.textContent = `${domain.name} · ${domain.enabled ? 'Enabled' : 'Not enabled'} (DNS and delivery not verified)`; list.append(item); }
+  for (const domain of result.data) {
+    const item = document.createElement('li'); const label = document.createElement('span');
+    label.textContent = `${domain.name} · ${domain.enabled ? 'Enabled' : 'Not enabled'} (DNS and delivery not verified)`; item.append(label);
+    const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Expected DNS records';
+    const content = document.createElement('div'); content.textContent = 'Open to load expected records. Their presence and delivery are not verified.'; details.append(summary, content);
+    let loadingDns = false;
+    details.addEventListener('toggle', async () => {
+      if (!details.open || details.dataset.loaded || loadingDns) return;
+      loadingDns = true; content.textContent = 'Loading expected DNS records…';
+      try {
+        const records = await api(`/api/cloudflare/zones/${encodeURIComponent(zone)}/domains/${encodeURIComponent(domain.tag)}/dns`);
+        if (generation !== cloudflareGeneration) return;
+        if (!Array.isArray(records.data) || records.data.some(record => !record || typeof record.type !== 'string' || typeof record.name !== 'string' || typeof record.content !== 'string')) throw new Error('Unexpected DNS response.');
+        content.replaceChildren(); const note = document.createElement('p'); note.textContent = 'Expected records from Cloudflare. DNS and delivery are not verified.'; content.append(note);
+        if (!records.data.length) { const empty = document.createElement('p'); empty.textContent = 'Cloudflare returned no expected records.'; content.append(empty); }
+        if (Number(records.result_info?.total_pages) > 1) { const warning = document.createElement('p'); warning.textContent = 'Cloudflare returned only the first page. Check Cloudflare for additional records.'; content.append(warning); }
+        for (const record of records.data) { const line = document.createElement('p'); line.textContent = `${record.type} · ${record.name} · ${record.content}${record.priority == null ? '' : ` · priority ${record.priority}`}`; content.append(line); }
+        details.dataset.loaded = 'true';
+      } catch (error) { if (generation === cloudflareGeneration) content.textContent = `${error.message} Close and reopen to retry.`; }
+      finally { loadingDns = false; }
+    });
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'text-button'; remove.textContent = 'Disable sending'; remove.setAttribute('aria-label', `Disable sending for ${domain.name}`);
+    remove.addEventListener('click', async () => {
+      if (!window.confirm(`Disable Email Sending for ${domain.name}? Cloudflare may remove sending DNS records. Other services using this domain can be affected.`)) return;
+      remove.disabled = true; $('#cloudflare-status').textContent = 'Disabling sending domain…';
+      try { await api(`/api/cloudflare/zones/${encodeURIComponent(zone)}/domains/${encodeURIComponent(domain.tag)}`, { method: 'DELETE' }); if (generation !== cloudflareGeneration) return; item.remove(); $('#cloudflare-status').textContent = 'Cloudflare accepted the request to disable sending.'; }
+      catch (error) { if (generation === cloudflareGeneration) $('#cloudflare-status').textContent = `${error.message} Check the domain before retrying.`; }
+      finally { remove.disabled = false; }
+    });
+    item.append(details, remove); list.append(item);
+  }
   return Number(result.result_info?.total_pages) > 1;
 }
 $('#cloudflare-selected-zone').addEventListener('change', () => { cloudflareGeneration++; $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; });

@@ -22,7 +22,7 @@ test('domain management calls only the configured Cloudflare zone and preserves 
     const created = await manageDomains(request('/domains', 'POST', { name: 'Mail.Example.com' }), env);
     assert.equal(created.status, 201); assert.deepEqual(JSON.parse(calls[1].options.body), { name: 'mail.example.com' });
     assert.equal((await manageDomains(request(`/domains/${tag}`), env)).status, 200);
-    assert.equal((await manageDomains(request(`/domains/${tag}/dns`), env)).status, 200);
+    const dns = await manageDomains(request(`/domains/${tag}/dns`), env); assert.equal(dns.status, 200); assert.equal((await dns.json()).result_info.total_pages, 3);
     assert.deepEqual(await (await manageDomains(request(`/domains/${tag}`, 'DELETE'), env)).json(), { id: tag, deleted: true });
     assert.ok(calls.every(call => call.url.startsWith(`https://api.cloudflare.com/client/v4/zones/${zone}/email/sending/subdomains`) && call.options.redirect === 'manual'));
     assert.ok(calls.every(call => call.options.headers.authorization === 'Bearer private-token'));
