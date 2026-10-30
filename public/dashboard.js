@@ -107,7 +107,7 @@ async function loadCloudflareDomains() {
         if (!Array.isArray(records.data) || records.data.some(record => !record || typeof record.type !== 'string' || typeof record.name !== 'string' || typeof record.content !== 'string')) throw new Error('Unexpected DNS response.');
         content.replaceChildren(); const note = document.createElement('p'); note.textContent = 'Expected records from Cloudflare. DNS and delivery are not verified.'; content.append(note);
         if (!records.data.length) { const empty = document.createElement('p'); empty.textContent = 'Cloudflare returned no expected records.'; content.append(empty); }
-        if (Number(records.result_info?.total_pages) > 1) { const warning = document.createElement('p'); warning.textContent = 'Cloudflare returned only the first page. Check Cloudflare for additional records.'; content.append(warning); }
+        if (records.incomplete === true) { const warning = document.createElement('p'); warning.textContent = 'Cloudflare may have returned an incomplete list. Check Cloudflare for additional records.'; content.append(warning); }
         for (const record of records.data) { const line = document.createElement('p'); line.textContent = `${record.type} · ${record.name} · ${record.content}${record.priority == null ? '' : ` · priority ${record.priority}`}`; content.append(line); }
         if (records.data.length) {
           const check = document.createElement('button'); check.type = 'button'; check.textContent = 'Check public DNS';
@@ -140,19 +140,19 @@ async function loadCloudflareDomains() {
     });
     item.append(details, remove); list.append(item);
   }
-  return Number(result.result_info?.total_pages) > 1;
+  return result.incomplete === true;
 }
 $('#cloudflare-selected-zone').addEventListener('change', () => { cloudflareGeneration++; $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; });
 $('#cloudflare-load-domains').addEventListener('click', async event => {
   event.currentTarget.disabled = true; $('#cloudflare-status').textContent = 'Loading sending domains…';
-  try { const incomplete = await loadCloudflareDomains(); if (incomplete === null) return; $('#cloudflare-status').textContent = incomplete ? 'Cloudflare returned only the first page. Check Cloudflare for additional domains.' : 'Sending domains loaded.'; } catch (error) { $('#cloudflare-status').textContent = error.message; }
+  try { const incomplete = await loadCloudflareDomains(); if (incomplete === null) return; $('#cloudflare-status').textContent = incomplete ? 'Cloudflare may have returned an incomplete list. Check Cloudflare for additional domains.' : 'Sending domains loaded.'; } catch (error) { $('#cloudflare-status').textContent = error.message; }
   finally { event.currentTarget.disabled = false; }
 });
 $('#cloudflare-domain-form').addEventListener('submit', async event => {
   event.preventDefault(); const zone = $('#cloudflare-selected-zone'); const name = $('#cloudflare-domain-name').value.trim();
   if (!window.confirm(`Enable Email Sending for ${name} in ${zone.selectedOptions[0].textContent}? Cloudflare may create sending DNS records shared with other services.`)) return;
   const generation = cloudflareGeneration; const button = event.currentTarget.querySelector('button'); button.disabled = true; $('#cloudflare-status').textContent = 'Enabling sending domain…';
-  try { await api(`/api/cloudflare/zones/${encodeURIComponent(zone.value)}/domains`, { method: 'POST', body: JSON.stringify({ name }) }); if (generation !== cloudflareGeneration) return; $('#cloudflare-domain-name').value = ''; const incomplete = await loadCloudflareDomains(); $('#cloudflare-status').textContent = `Cloudflare accepted the configuration. DNS and delivery readiness are not yet verified.${incomplete ? ' The list contains only the first page.' : ''}`; }
+  try { await api(`/api/cloudflare/zones/${encodeURIComponent(zone.value)}/domains`, { method: 'POST', body: JSON.stringify({ name }) }); if (generation !== cloudflareGeneration) return; $('#cloudflare-domain-name').value = ''; const incomplete = await loadCloudflareDomains(); $('#cloudflare-status').textContent = `Cloudflare accepted the configuration. DNS and delivery readiness are not yet verified.${incomplete ? ' The list may be incomplete.' : ''}`; }
   catch (error) { if (generation === cloudflareGeneration) $('#cloudflare-status').textContent = `${error.message} Check the domain list before retrying.`; }
   finally { button.disabled = false; }
 });

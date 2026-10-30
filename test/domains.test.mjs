@@ -54,3 +54,12 @@ test('domain list rejects a malformed upstream success response', async () => {
   }
   finally { globalThis.fetch = original; }
 });
+
+test('detects incomplete lists from total_count even without total_pages', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ success: true, result: [{ tag: '1'.repeat(32), name: 'example.com', enabled: true }], result_info: { total_count: 2 } });
+  try {
+    const response = await manageDomains(new Request('https://example.test/domains'), { zoneId: 'a'.repeat(32), accessToken: 'test' });
+    assert.equal((await response.json()).incomplete, true);
+  } finally { globalThis.fetch = original; }
+});

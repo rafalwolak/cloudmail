@@ -19,8 +19,8 @@ export async function listDomains(request: Request, env: { DB: D1Database; BETTE
     for (const zone of zones) {
       const response = await manageDomains(new Request('https://cloudmail.invalid/domains'), { zoneId: zone.id, accessToken });
       if (!response.ok) return json({ message: 'Cloudflare domains could not be retrieved' }, 502);
-      const page = await response.json() as { data: { tag: string; name: string; enabled: boolean; created?: string }[]; result_info?: { total_pages?: number } };
-      if (Number(page.result_info?.total_pages) > 1) return json({ message: 'Cloudflare returned an incomplete domain list; pagination is not supported by its documented API' }, 502);
+      const page = await response.json() as { data: { tag: string; name: string; enabled: boolean; created?: string }[]; incomplete?: boolean };
+      if (page.incomplete) return json({ message: 'Cloudflare returned an incomplete domain list; pagination is not supported by its documented API' }, 502);
       for (const domain of page.data) {
         if (tags.has(domain.tag.toLowerCase())) return json({ message: 'Cloudflare domain identifiers are ambiguous' }, 502);
         tags.add(domain.tag.toLowerCase());
@@ -84,9 +84,9 @@ export async function getDomain(request: Request, env: { DB: D1Database; BETTER_
     if (!found) return json({ message: 'Domain not found' }, 404);
     const dns = await manageDomains(new Request(`https://cloudmail.invalid/domains/${id}/dns`), { zoneId: found.zoneId, accessToken });
     if (!dns.ok) return json({ message: 'Cloudflare DNS records could not be retrieved' }, 502);
-    const records = await dns.json() as { data?: unknown; result_info?: { total_pages?: number } };
+    const records = await dns.json() as { data?: unknown; incomplete?: boolean };
     if (!Array.isArray(records.data)) return json({ message: 'Invalid Cloudflare DNS response' }, 502);
-    return json({ id: found.domain.tag, name: found.domain.name, status: 'unknown', zone_id: found.zoneId, enabled: found.domain.enabled, ...(found.domain.created && { created_at: found.domain.created }), records: records.data, records_incomplete: Number(records.result_info?.total_pages) > 1 });
+    return json({ id: found.domain.tag, name: found.domain.name, status: 'unknown', zone_id: found.zoneId, enabled: found.domain.enabled, ...(found.domain.created && { created_at: found.domain.created }), records: records.data, records_incomplete: records.incomplete === true });
   } catch { return json({ message: 'Cloudflare domain could not be retrieved' }, 502); }
 }
 
