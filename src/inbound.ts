@@ -1,5 +1,6 @@
 import PostalMime from 'postal-mime';
 import { attachmentForAgent } from './agent-attachment.ts';
+import { attachmentList } from './attachment-list.ts';
 
 export interface InboundEnv { DB: D1Database; INBOUND: R2Bucket; INBOUND_ENABLED?: string; INBOUND_ADDRESSES?: string }
 interface InboundRow { id: string; sender: string; recipient: string; subject: string; created_at: string; object_key: string }
@@ -46,7 +47,7 @@ export async function readReceived(request: Request, env: InboundEnv): Promise<R
     const result = rows.results.slice(0, limit); if (before !== null) result.reverse();
     return response({ object: 'list', data: result.map(row => ({ ...row, from: row.sender, to: [row.recipient] })), has_more: rows.results.length > limit });
   }
-  const match = url.pathname.match(/^\/emails\/receiving\/([0-9a-f-]{36})(?:\/attachments\/(\d+))?$/);
+  const match = url.pathname.match(/^\/emails\/receiving\/([0-9a-f-]{36})(?:\/(attachments)(?:\/(\d+))?)?$/);
   if (!match) return response({ message: 'Not found' }, 404);
   const row = await env.DB.prepare('SELECT * FROM inbound_emails WHERE id = ?').bind(match[1]).first<InboundRow>();
   if (!row) return response({ message: 'Not found' }, 404);
@@ -54,14 +55,16 @@ export async function readReceived(request: Request, env: InboundEnv): Promise<R
   if (!object) return response({ message: 'Email content is unavailable' }, 503);
   const parsed = await PostalMime.parse(await object.arrayBuffer());
   const bytes = (value: string | ArrayBuffer | Uint8Array): Uint8Array<ArrayBuffer> => typeof value === 'string' ? new TextEncoder().encode(value) : value instanceof ArrayBuffer ? new Uint8Array(value) : Uint8Array.from(value);
-  if (match[2] !== undefined) {
-    const attachment = parsed.attachments[Number(match[2])];
+  if (match[3] !== undefined) {
+    const attachment = parsed.attachments[Number(match[3])];
     if (!attachment) return response({ message: 'Not found' }, 404);
     const filename = attachment.filename ? encodeURIComponent(new TextDecoder().decode(new TextEncoder().encode(attachment.filename))).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`) : null;
     const content = bytes(attachment.content);
     return new Response(content, { headers: { 'content-type': 'application/octet-stream', 'content-length': String(content.byteLength), 'content-disposition': filename ? `attachment; filename*=UTF-8''${filename}` : 'attachment', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' } });
   }
-  return response({ id: row.id, from: row.sender, to: row.recipient, header_from: parsed.from ?? null, header_to: parsed.to ?? [], cc: parsed.cc ?? [], bcc: parsed.bcc ?? [], reply_to: parsed.replyTo ?? [], subject: parsed.subject ?? row.subject, created_at: row.created_at, text: parsed.text ?? null, html: parsed.html ?? null, message_id: parsed.messageId ?? null, in_reply_to: parsed.inReplyTo ?? null, references: parsed.references ?? null, attachments: parsed.attachments.map((attachment, index) => ({ id: String(index), filename: attachment.filename, content_type: attachment.mimeType, content_id: attachment.contentId ?? null, content_disposition: attachment.disposition, size: bytes(attachment.content).byteLength })) });
+  const attachments = parsed.attachments.map((attachment, index) => ({ id: String(index), filename: attachment.filename, content_type: attachment.mimeType, content_id: attachment.contentId ?? null, content_disposition: attachment.disposition, size: bytes(attachment.content).byteLength }));
+  if (match[2]) return attachmentList(attachments, url.searchParams);
+  return response({ id: row.id, from: row.sender, to: row.recipient, header_from: parsed.from ?? null, header_to: parsed.to ?? [], cc: parsed.cc ?? [], bcc: parsed.bcc ?? [], reply_to: parsed.replyTo ?? [], subject: parsed.subject ?? row.subject, created_at: row.created_at, text: parsed.text ?? null, html: parsed.html ?? null, message_id: parsed.messageId ?? null, in_reply_to: parsed.inReplyTo ?? null, references: parsed.references ?? null, attachments });
 }
 
 export async function readReceivedAttachmentForAgent(id: string, index: number, env: InboundEnv) {

@@ -90,3 +90,5 @@ Sent email details include attachment metadata when retained. Download a file wi
 Cancellation schedules removal of any pre-send archive, even if its database flag was not saved. The minute cron retries cleanup after storage or database failures; deletion is asynchronous and may be delayed by backlog or service availability.
 
 The `get_sent_attachment` MCP tool returns an archived attachment as base64 to full-access clients, with a 1 MiB limit. Use the authenticated download API for larger files. Treat file contents as untrusted.
+
+Full-access clients can list attachment metadata at `GET /emails/{id}/attachments` and `GET /emails/receiving/{id}/attachments`, or with MCP `list_sent_attachments` and `list_received_attachments`. Lists support `limit`, `before`, and `after`; cursors are zero-based attachment indexes. The download endpoint requires authentication and returns file bytes rather than a temporary public URL, so this is not the complete Resend attachment contract. Older sent messages without retained attachment metadata return 404.

@@ -2,6 +2,7 @@ import { parseStoredAttachments, readSentContent, storeSentContent } from './sen
 import type { AuthEnv } from './auth';
 import type { OutboundEmail } from './email';
 import { withPlainText } from './plain-text';
+import { attachmentList } from './attachment-list';
 
 export class IdempotencyConflict extends Error {
   constructor(public code: string) { super(code); }
@@ -125,6 +126,13 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
     }
     const result = await env.DB.prepare(`SELECT id, recipient, type, occurred_at, details FROM delivery_events WHERE provider_id = ? ${condition} ORDER BY occurred_at ASC, id ASC LIMIT ?`).bind(email.provider_id, ...values, Number(raw) + 1).all<{ id: string; recipient: string; type: string; occurred_at: string; details: string }>();
     return Response.json({ object: 'list', data: result.results.slice(0, Number(raw)).map(event => ({ ...event, details: JSON.parse(event.details) })), has_more: result.results.length > Number(raw) }, { headers: { 'cache-control': 'no-store' } });
+  }
+  const attachmentListMatch = url.pathname.match(/^\/emails\/([0-9a-f-]{36})\/attachments$/);
+  if (attachmentListMatch) {
+    const detail = await readHistory(new Request(new URL(`/emails/${attachmentListMatch[1]}`, url)), env);
+    if (!detail.ok) return detail;
+    const data = await detail.json() as { attachments: unknown[] | null };
+    return data.attachments === null ? Response.json({ message: 'Attachment metadata is unavailable' }, { status: 404, headers: { 'cache-control': 'no-store' } }) : attachmentList(data.attachments, url.searchParams);
   }
   const attachmentMatch = url.pathname.match(/^\/emails\/([0-9a-f-]{36})\/attachments\/(\d+)$/);
   if (attachmentMatch) {

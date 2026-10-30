@@ -68,6 +68,9 @@ test('returns attachments as downloads with safe response headers', async () => 
   assert.equal(detail.attachments[0].filename, 'unsafe.html');
   assert.equal(detail.attachments[0].content_disposition, 'attachment');
   assert.equal(detail.attachments[0].content_id, null);
+  const list = await readReceived(new Request(`https://example.com/emails/receiving/${id}/attachments?limit=1`), context.env);
+  assert.equal(list.status, 200); assert.deepEqual((await list.json()).data, detail.attachments);
+  assert.equal((await readReceived(new Request(`https://example.com/emails/receiving/${id}/attachments?after=bad`), context.env)).status, 400);
   const attachment = await readReceived(new Request(`https://example.com/emails/receiving/${id}/attachments/0`), context.env);
   assert.equal(attachment.headers.get('content-type'), 'application/octet-stream');
   assert.equal(attachment.headers.get('content-disposition'), "attachment; filename*=UTF-8''unsafe.html");
