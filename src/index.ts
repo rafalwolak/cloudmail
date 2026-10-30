@@ -2,7 +2,7 @@ import { createAuth, type AuthEnv } from './auth';
 import { parseEmail } from './email';
 import { handleMcp } from './mcp';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
-import { isValidKey, manageKeys, type KeyEnv } from './keys';
+import { authorizeAdmin, isValidKey, manageKeys, type KeyEnv } from './keys';
 
 interface Env extends AuthEnv, KeyEnv { API_KEY: string; ASSETS: Fetcher }
 
@@ -16,6 +16,12 @@ export default {
       return createAuth(env).handler(request);
     }
     if (url.pathname === '/api/keys' || url.pathname.startsWith('/api/keys/')) return manageKeys(request, env);
+    if (url.pathname === '/api/history' && request.method === 'GET') {
+      const admin = await authorizeAdmin(request, env);
+      if (admin instanceof Response) return admin;
+      url.pathname = '/emails';
+      return readHistory(new Request(url), env);
+    }
     if (request.method === 'GET' && ['/dashboard', '/dashboard.js', '/dashboard.css'].includes(url.pathname)) {
       const path = url.pathname === '/dashboard' ? '/dashboard.html' : url.pathname;
       const response = await env.ASSETS.fetch(new Request(new URL(path, url), request));

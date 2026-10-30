@@ -20,6 +20,7 @@ function setSignedIn(session) {
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) $('#account').textContent = `Signed in as ${session.user.email}`;
+  else { $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; }
 }
 async function loadKeys() {
   const { data } = await api('/api/keys');
@@ -41,6 +42,31 @@ async function loadKeys() {
     item.append(name, revoke); list.append(item);
   }
 }
+let historyCursor = null;
+async function loadHistory(reset = false) {
+  const message = $('#history-status');
+  message.textContent = 'Loading email attempts…';
+  const params = new URLSearchParams({ limit: '20' });
+  if (!reset && historyCursor) params.set('after', historyCursor);
+  const result = await api(`/api/history?${params}`);
+  const list = $('#history-list');
+  if (reset) list.replaceChildren();
+  for (const email of result.data) {
+    const item = document.createElement('li');
+    const subject = document.createElement('strong'); subject.textContent = email.subject;
+    const detail = document.createElement('span'); detail.textContent = `${email.to.join(', ')} · ${email.status} · ${new Date(email.created_at).toLocaleString()}`;
+    item.append(subject, detail); list.append(item);
+  }
+  historyCursor = result.data.at(-1)?.id || null;
+  $('#empty-history').hidden = list.children.length > 0;
+  $('#load-more').hidden = !result.has_more;
+  message.textContent = '';
+}
+$('#load-more').addEventListener('click', async () => {
+  const button = $('#load-more'); button.disabled = true;
+  try { await loadHistory(); } catch (error) { $('#history-status').textContent = error.message; }
+  finally { button.disabled = false; }
+});
 $('#signup-form').addEventListener('submit', async (event) => {
   event.preventDefault(); announce('Creating account…');
   try {
@@ -69,7 +95,7 @@ $('#login-form').addEventListener('submit', async (event) => {
     await api('/api/auth/sign-in/email', { method: 'POST', body: JSON.stringify({ email: $('#email').value, password: $('#password').value }) });
     $('#password').value = '';
     const session = await api('/api/auth/get-session'); setSignedIn(session);
-    await loadKeys(); announce('Signed in.');
+    await loadKeys(); await loadHistory(true); announce('Signed in.');
   } catch (error) { announce(error.message); }
 });
 $('#sign-out').addEventListener('click', async () => {
@@ -89,6 +115,6 @@ $('#copy-key').addEventListener('click', async () => {
   catch { announce('Could not copy. Select and copy the key manually.'); }
 });
 (async () => {
-  try { if (resetToken) { showView('reset'); return; } if (resetError) { showView('forgot'); announce('This recovery link is invalid or has expired. Request a new one.'); return; } const session = await api('/api/auth/get-session'); setSignedIn(session); if (session) await loadKeys(); }
+  try { if (resetToken) { showView('reset'); return; } if (resetError) { showView('forgot'); announce('This recovery link is invalid or has expired. Request a new one.'); return; } const session = await api('/api/auth/get-session'); setSignedIn(session); if (session) { await loadKeys(); await loadHistory(true); } }
   catch (error) { announce(error.message); }
 })();

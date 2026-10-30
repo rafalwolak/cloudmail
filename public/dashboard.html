@@ -24,6 +24,7 @@
         <form id="key-form"><label for="key-name">Key name</label><div class="key-entry"><input id="key-name" name="name" maxlength="100" required placeholder="Production server"><button type="submit">Create key <span aria-hidden="true">↗</span></button></div></form>
         <div id="new-key" class="secret" hidden><strong>Copy your key now</strong><p>This key will not be shown again.</p><code id="key-value"></code><button id="copy-key" class="secondary" type="button">Copy key</button></div>
         <h3>Active keys</h3><ul id="key-list" class="key-list"></ul><p id="empty-keys" hidden>No API keys yet. Create one to get started.</p>
+        <section aria-labelledby="history-title" class="history"><h3 id="history-title">Recent email attempts</h3><p>Accepted means Cloudflare accepted the message, not that it was delivered. Message content is not stored here.</p><ul id="history-list" class="history-list"></ul><p id="empty-history" hidden>No email attempts yet.</p><button id="load-more" class="secondary" type="button" hidden>Load older attempts</button><p id="history-status" role="status" aria-live="polite"></p></section>
       </div>
       <p id="status" role="status" aria-live="polite"></p>
     </section>
