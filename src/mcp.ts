@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { allowedSender, parseEmail } from './email';
 import { findKeyOwner, handleKeyResources, type KeyAccess, type KeyEnv } from './keys';
 import { sendBatch } from './batch';
+import { manageWebhooks } from './webhooks';
 import { deleteReceived, readReceived, type InboundEnv } from './inbound';
 import { handleTemplates, resolveTemplate } from './templates';
 import { manageSchedule, scheduleEmail, validateSchedule } from './scheduled';
@@ -56,6 +57,15 @@ export async function handleMcp(request: Request, env: KeyEnv & InboundEnv, acce
     return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
   });
   if (access.permission === 'full_access') {
+  const webhookTool = async (path: string, method: string, body?: unknown) => {
+    const response = await manageWebhooks(new Request(new URL(path, env.BETTER_AUTH_URL), { method, ...(body !== undefined && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) }), env);
+    return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
+  };
+  const webhookEvents = z.enum(['email.delivered', 'email.deferred', 'email.bounced', 'email.failed', 'email.rejected', 'email.complained']);
+  server.registerTool('list_webhooks', { description: 'List webhook endpoints and subscribed delivery events, without signing secrets.', inputSchema: z.object({}).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async () => webhookTool('/webhooks', 'GET'));
+  server.registerTool('create_webhook', { description: 'Register an HTTPS webhook for Cloudflare delivery events. The signing secret is returned once and must be stored securely.', inputSchema: z.object({ endpoint: z.string(), events: z.array(webhookEvents).min(1).max(6) }).strict(), annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } }, async args => webhookTool('/webhooks', 'POST', args));
+  server.registerTool('get_webhook', { description: 'Get webhook configuration without its signing secret.', inputSchema: z.object({ id: z.string().uuid() }).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async ({ id }) => webhookTool(`/webhooks/${id}`, 'GET'));
+  server.registerTool('delete_webhook', { description: 'Permanently delete a webhook and its pending deliveries.', inputSchema: z.object({ id: z.string().uuid() }).strict(), annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } }, async ({ id }) => webhookTool(`/webhooks/${id}`, 'DELETE'));
   const keyTool = async (path: string, method: string, body?: unknown) => {
     const owner = await findKeyOwner(env);
     if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'Verified administrator is not configured' }] };

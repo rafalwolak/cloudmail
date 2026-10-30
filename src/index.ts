@@ -1,6 +1,7 @@
 import { createAuth, type AuthEnv } from './auth';
 import { allowedSender, parseEmail } from './email';
 import { handleMcp } from './mcp';
+import { manageWebhooks, processWebhooks } from './webhooks';
 import { deleteReceived, receiveEmail, readReceived, type InboundEnv } from './inbound';
 import { sendBatch } from './batch';
 import { manageSchedule, processScheduled, scheduleEmail, validateSchedule } from './scheduled';
@@ -15,7 +16,7 @@ const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
 
 export default {
   async email(message: ForwardableEmailMessage, env: Env): Promise<void> { await receiveEmail(message, env); },
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await processScheduled(env); },
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await processScheduled(env); await processWebhooks(env); },
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
     if (!env.DELIVERY_QUEUE_NAME || batch.queue !== env.DELIVERY_QUEUE_NAME) { batch.retryAll(); return; }
     await processDeliveryBatch(batch, env.DB);
@@ -68,13 +69,14 @@ export default {
       return new Response(response.body, { status: response.status, headers });
     }
     if (url.pathname === '/' && request.method === 'GET') return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'", 'x-content-type-options': 'nosniff' } });
-    if (url.pathname !== '/mcp' && !(url.pathname === '/api-keys' || url.pathname.startsWith('/api-keys/')) && !(url.pathname === '/templates' || url.pathname.startsWith('/templates/')) && !(url.pathname === '/emails/batch' && request.method === 'POST') && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && ['GET', 'PATCH', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/receiving/') && request.method === 'DELETE')) return Response.json({ message: 'Not found' }, { status: 404 });
+    if (url.pathname !== '/mcp' && !(url.pathname === '/webhooks' || url.pathname.startsWith('/webhooks/')) && !(url.pathname === '/api-keys' || url.pathname.startsWith('/api-keys/')) && !(url.pathname === '/templates' || url.pathname.startsWith('/templates/')) && !(url.pathname === '/emails/batch' && request.method === 'POST') && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && ['GET', 'PATCH', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/receiving/') && request.method === 'DELETE')) return Response.json({ message: 'Not found' }, { status: 404 });
     const authorization = request.headers.get('Authorization') || '';
     const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
     const access = env.API_KEY && token === env.API_KEY ? { permission: 'full_access' as const, sending_domain: null } : await keyPermission(env.DB, token, env.ADMIN_EMAIL);
     if (!access) return Response.json({ message: 'Unauthorized' }, { status: 401 });
     if (access.permission === 'sending_access' && url.pathname !== '/mcp' && !(request.method === 'POST' && (url.pathname === '/emails' || url.pathname === '/emails/batch'))) return Response.json({ message: 'Forbidden' }, { status: 403 });
     if (url.pathname === '/mcp') return handleMcp(request, env, access);
+    if (url.pathname === '/webhooks' || url.pathname.startsWith('/webhooks/')) return manageWebhooks(request, env);
     if (url.pathname === '/api-keys' || url.pathname.startsWith('/api-keys/')) {
       const owner = await findKeyOwner(env);
       if (!owner) return Response.json({ message: 'Verified administrator is not configured' }, { status: 503 });
