@@ -57,6 +57,12 @@ test('webhook API creates private secrets, enqueues delivery events and exposes 
     assert.equal((await fetch(`${base}/webhooks/${id}/deliveries?after=missing`, { headers })).status, 400);
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers } }));
     const tools = await client.listTools(); for (const name of ['list_webhooks', 'create_webhook', 'get_webhook', 'delete_webhook', 'list_webhook_deliveries', 'replay_webhook_delivery', 'update_webhook', 'rotate_webhook_secret']) assert.ok(tools.tools.some(tool => tool.name === name));
+    for (const name of ['list_webhook_events', 'get_webhook_event', 'list_webhook_event_attempts', 'replay_webhook_event']) assert.ok(tools.tools.some(tool => tool.name === name));
+    assert.equal(tools.tools.find(tool => tool.name === 'replay_webhook_event').annotations.idempotentHint, false);
+    const event = await client.callTool({ name: 'get_webhook_event', arguments: { webhook_id: id, event_id: deliveryId } });
+    assert.deepEqual(JSON.parse(event.content[0].text).payload, snapshot);
+    const eventAttempts = await client.callTool({ name: 'list_webhook_event_attempts', arguments: { webhook_id: id, event_id: deliveryId, limit: 1 } });
+    assert.equal(JSON.parse(eventAttempts.content[0].text).has_more, true);
     const mcpDeliveries = await client.callTool({ name: 'list_webhook_deliveries', arguments: { id, limit: 1 } });
     assert.equal(JSON.parse(mcpDeliveries.content[0].text).data[0].event_id, eventId);
     const mcpAttempts = await client.callTool({ name: 'list_webhook_attempts', arguments: { id, delivery_id: deliveryId } });
