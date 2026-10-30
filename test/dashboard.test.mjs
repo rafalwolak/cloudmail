@@ -108,5 +108,6 @@ test('dashboard webhooks require an administrator and reject cross-origin change
   const list = await (await fetch(`${base}/api/webhooks`, { headers: { cookie } })).json();
   assert.ok(list.data.some(item => item.id === id)); assert.ok(!JSON.stringify(list).includes(signing_secret));
   assert.equal((await fetch(`${base}/api/webhooks/${id}/deliveries`, { headers: { cookie } })).status, 200);
+  assert.equal((await fetch(`${base}/api/webhooks/${id}/deliveries/${'0'.repeat(32)}/replay`, { method: 'POST', headers: { cookie, origin: 'https://attacker.example' } })).status, 403);
   assert.equal((await fetch(`${base}/api/webhooks/${id}`, { method: 'DELETE', headers: { cookie, origin: base } })).status, 200);
 });

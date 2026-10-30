@@ -69,6 +69,7 @@ export async function handleMcp(request: Request, env: KeyEnv & InboundEnv, acce
     const params = new URLSearchParams(); if (limit !== undefined) params.set('limit', String(limit)); if (after !== undefined) params.set('after', after);
     return webhookTool(`/webhooks/${id}/deliveries?${params}`, 'GET');
   });
+  server.registerTool('replay_webhook_delivery', { description: 'Queue a new delivery of a webhook event without changing existing retries. Only use when explicitly authorized.', inputSchema: z.object({ id: z.string().uuid(), delivery_id: z.string().regex(/^[0-9a-f]{32}$/) }).strict(), annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } }, async ({ id, delivery_id }) => webhookTool(`/webhooks/${id}/deliveries/${delivery_id}/replay`, 'POST'));
   server.registerTool('delete_webhook', { description: 'Permanently delete a webhook and its pending deliveries.', inputSchema: z.object({ id: z.string().uuid() }).strict(), annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } }, async ({ id }) => webhookTool(`/webhooks/${id}`, 'DELETE'));
   const keyTool = async (path: string, method: string, body?: unknown) => {
     const owner = await findKeyOwner(env);

@@ -32,6 +32,12 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
     await env.DB.prepare('INSERT INTO webhooks (id, endpoint, events, signing_secret, created_at) VALUES (?, ?, ?, ?, ?)').bind(id, value.endpoint, JSON.stringify(value.events), secret, new Date().toISOString()).run();
     return json({ object: 'webhook', id, signing_secret: secret }, 201);
   }
+  const replay = path.match(/^\/webhooks\/([0-9a-f-]{36})\/deliveries\/([0-9a-f]{32})\/replay$/);
+  if (replay && request.method === 'POST') {
+    const id = crypto.randomUUID().replaceAll('-', '');
+    const result = await env.DB.prepare("INSERT INTO webhook_deliveries (id, webhook_id, event_id, next_attempt, replay_of) SELECT ?, webhook_id, event_id, ?, id FROM webhook_deliveries WHERE webhook_id = ? AND id = ?").bind(id, new Date().toISOString(), replay[1], replay[2]).run();
+    return result.meta.changes ? json({ id, replay_of: replay[2] }, 201) : json({ message: 'Not found' }, 404);
+  }
   const deliveries = path.match(/^\/webhooks\/([0-9a-f-]{36})\/deliveries$/);
   if (deliveries && request.method === 'GET') {
     const params = new URL(request.url).searchParams; const raw = params.get('limit') ?? '20'; const after = params.get('after');
@@ -45,7 +51,7 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
       condition = 'AND (e.occurred_at, d.id) < (?, ?)'; values = [anchor.occurred_at, anchor.id];
     }
     const limit = Number(raw);
-    const rows = await env.DB.prepare(`SELECT d.id, d.event_id, d.state, d.attempts, d.next_attempt, d.last_status, e.type, e.occurred_at FROM webhook_deliveries d JOIN delivery_events e ON e.id = d.event_id WHERE d.webhook_id = ? ${condition} ORDER BY e.occurred_at DESC, d.id DESC LIMIT ?`).bind(deliveries[1], ...values, limit + 1).all();
+    const rows = await env.DB.prepare(`SELECT d.id, d.event_id, d.state, d.attempts, d.next_attempt, d.last_status, d.replay_of, e.type, e.occurred_at FROM webhook_deliveries d JOIN delivery_events e ON e.id = d.event_id WHERE d.webhook_id = ? ${condition} ORDER BY e.occurred_at DESC, d.id DESC LIMIT ?`).bind(deliveries[1], ...values, limit + 1).all();
     return json({ object: 'list', data: rows.results.slice(0, limit), has_more: rows.results.length > limit });
   }
   const match = path.match(/^\/webhooks\/([0-9a-f-]{36})$/);

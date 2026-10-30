@@ -153,7 +153,15 @@ async function loadWebhooks() {
             const params = new URLSearchParams({ limit: '20' }); if (cursor) params.set('after', cursor);
             const page = await api(`/api/webhooks/${encodeURIComponent(webhook.id)}/deliveries?${params}`);
             for (const delivery of page.data) {
-              const row = document.createElement('li'); row.textContent = `${delivery.type} · ${delivery.state} · ${delivery.attempts} attempts${delivery.last_status ? ` · HTTP ${delivery.last_status}` : ''} · ${new Date(delivery.occurred_at).toLocaleString()}`; rows.append(row);
+              const row = document.createElement('li'); const label = document.createElement('span'); label.textContent = `${delivery.type} · ${delivery.state} · ${delivery.attempts} attempts${delivery.last_status ? ` · HTTP ${delivery.last_status}` : ''} · ${new Date(delivery.occurred_at).toLocaleString()}`;
+              const replay = document.createElement('button'); replay.type = 'button'; replay.className = 'text-button'; replay.textContent = 'Replay'; replay.setAttribute('aria-label', `Replay ${delivery.type} delivery ${delivery.id}`);
+              replay.addEventListener('click', async () => {
+                if (!window.confirm('Queue another delivery of this event? The existing retry schedule will continue.')) return;
+                replay.disabled = true;
+                try { await api(`/api/webhooks/${encodeURIComponent(webhook.id)}/deliveries/${encodeURIComponent(delivery.id)}/replay`, { method: 'POST', body: '{}' }); $('#webhook-status').textContent = 'Replay queued. Close and reopen delivery attempts to refresh.'; details.dataset.loaded = ''; }
+                catch (error) { $('#webhook-status').textContent = error.message; replay.disabled = false; }
+              });
+              row.append(label, replay); rows.append(row);
             }
             cursor = page.data.at(-1)?.id || cursor; more.hidden = !page.has_more;
             if (!rows.children.length) { const empty = document.createElement('p'); empty.textContent = 'No delivery attempts yet.'; content.prepend(empty); }

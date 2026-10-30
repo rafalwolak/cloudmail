@@ -25,11 +25,21 @@ test('webhook API creates private secrets, enqueues delivery events and exposes 
     const page = await deliveries.json(); assert.equal(page.data.length, 1);
     assert.equal(page.data[0].state, 'pending'); assert.equal(page.data[0].event_id, eventId);
     assert.ok(!JSON.stringify(page).includes(signing_secret));
+    const replay = await fetch(`${base}/webhooks/${id}/deliveries/${page.data[0].id}/replay`, { method: 'POST', headers });
+    assert.equal(replay.status, 201);
+    const replayId = (await replay.json()).id; assert.notEqual(replayId, page.data[0].id);
+    const afterReplay = await (await fetch(`${base}/webhooks/${id}/deliveries?limit=10`, { headers })).json();
+    assert.equal(afterReplay.data.length, 2);
+    assert.equal(afterReplay.data.find(item => item.id === replayId).replay_of, page.data[0].id);
+    assert.equal(afterReplay.data.find(item => item.id === page.data[0].id).state, 'pending');
+    assert.equal((await fetch(`${base}/webhooks/${id}/deliveries/${'0'.repeat(32)}/replay`, { method: 'POST', headers })).status, 404);
     assert.equal((await fetch(`${base}/webhooks/${id}/deliveries?after=missing`, { headers })).status, 400);
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers } }));
-    const tools = await client.listTools(); for (const name of ['list_webhooks', 'create_webhook', 'get_webhook', 'delete_webhook', 'list_webhook_deliveries']) assert.ok(tools.tools.some(tool => tool.name === name));
+    const tools = await client.listTools(); for (const name of ['list_webhooks', 'create_webhook', 'get_webhook', 'delete_webhook', 'list_webhook_deliveries', 'replay_webhook_delivery']) assert.ok(tools.tools.some(tool => tool.name === name));
     const mcpDeliveries = await client.callTool({ name: 'list_webhook_deliveries', arguments: { id, limit: 1 } });
     assert.equal(JSON.parse(mcpDeliveries.content[0].text).data[0].event_id, eventId);
+    const replayed = await client.callTool({ name: 'replay_webhook_delivery', arguments: { id, delivery_id: replayId } });
+    assert.notEqual(replayed.isError, true);
     const fetched = await client.callTool({ name: 'get_webhook', arguments: { id } }); assert.equal(JSON.parse(fetched.content[0].text).id, id);
   } finally {
     await client.close();
