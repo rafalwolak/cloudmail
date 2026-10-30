@@ -46,6 +46,31 @@ export async function inspectDeliverySubscription(token: string, accountId: stri
   return planDeliverySubscription(subscriptions, queueId, zoneId, domain);
 }
 
+export async function ensureDeliverySubscription(db: D1Database, token: string, accountId: string, queueName: string, zoneId: string, domain: string): Promise<{ action: 'ready' | 'created'; id: string } | { action: 'conflict'; ids: string[] }> {
+  if (!token || !/^[a-f0-9]{32}$/i.test(accountId) || !/^[a-z0-9_-]{1,63}$/i.test(queueName)) throw new Error('Invalid Cloudflare queue target');
+  planDeliverySubscription([], '0'.repeat(32), zoneId, domain);
+  const target = `${accountId.toLowerCase()}:${queueName}:${zoneId.toLowerCase()}:${domain.toLowerCase()}`;
+  const owner = crypto.randomUUID(); const now = Date.now();
+  const lock = await db.prepare('INSERT INTO delivery_subscription_locks (target, owner, expires_at) VALUES (?, ?, ?) ON CONFLICT(target) DO UPDATE SET owner = excluded.owner, expires_at = excluded.expires_at WHERE expires_at <= ? RETURNING owner').bind(target, owner, now + 600000, now).first<{ owner: string }>();
+  if (!lock) throw new Error('Delivery subscription setup is already in progress');
+  let uncertain = false;
+  try {
+    const plan = await inspectDeliverySubscription(token, accountId, queueName, zoneId, domain);
+    if (plan.action !== 'create') return plan;
+    uncertain = true;
+    const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/event_subscriptions/subscriptions`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(plan.request), redirect: 'manual', signal: AbortSignal.timeout(10000) });
+    if (!response.ok) throw new Error('Cloudflare subscription creation could not be confirmed');
+    const body = await response.json() as { success?: unknown; result?: unknown };
+    if (body.success !== true || !body.result || typeof body.result !== 'object') throw new Error('Cloudflare subscription creation could not be confirmed');
+    const value = body.result as Partial<Subscription>;
+    if (typeof value.id !== 'string' || !value.id || value.enabled !== true || !value.destination || !value.source || !Array.isArray(value.events) || planDeliverySubscription([value as Subscription], plan.request.destination.queue_id, zoneId, domain).action !== 'ready') throw new Error('Cloudflare subscription creation could not be confirmed');
+    uncertain = false;
+    return { action: 'created', id: value.id };
+  } finally {
+    if (!uncertain) await db.prepare('DELETE FROM delivery_subscription_locks WHERE target = ? AND owner = ?').bind(target, owner).run();
+  }
+}
+
 export function planDeliverySubscription(subscriptions: Subscription[], queueId: string, zoneId: string, domain: string):
   | { action: 'create'; request: { name: string; enabled: true; destination: { type: 'queues.queue'; queue_id: string }; source: { type: 'email.sending'; zone_id: string; domain: string }; events: string[] } }
   | { action: 'ready'; id: string }
