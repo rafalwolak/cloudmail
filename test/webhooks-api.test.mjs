@@ -20,8 +20,16 @@ test('webhook API creates private secrets, enqueues delivery events and exposes 
     execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--command', `INSERT INTO delivery_events (id, provider_id, recipient, type, occurred_at) VALUES ('${eventId}', 'test-provider', 'recipient@example.com', 'delivered', '2026-10-30T10:00:00.000Z')`], { stdio: 'pipe' });
     const out = execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--json', '--command', `SELECT webhook_id, event_id, state FROM webhook_deliveries WHERE webhook_id = '${id}' AND event_id = '${eventId}'`], { encoding: 'utf8' });
     assert.deepEqual(JSON.parse(out)[0].results, [{ webhook_id: id, event_id: eventId, state: 'pending' }]);
+    const deliveries = await fetch(`${base}/webhooks/${id}/deliveries?limit=1`, { headers });
+    assert.equal(deliveries.status, 200);
+    const page = await deliveries.json(); assert.equal(page.data.length, 1);
+    assert.equal(page.data[0].state, 'pending'); assert.equal(page.data[0].event_id, eventId);
+    assert.ok(!JSON.stringify(page).includes(signing_secret));
+    assert.equal((await fetch(`${base}/webhooks/${id}/deliveries?after=missing`, { headers })).status, 400);
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers } }));
-    const tools = await client.listTools(); for (const name of ['list_webhooks', 'create_webhook', 'get_webhook', 'delete_webhook']) assert.ok(tools.tools.some(tool => tool.name === name));
+    const tools = await client.listTools(); for (const name of ['list_webhooks', 'create_webhook', 'get_webhook', 'delete_webhook', 'list_webhook_deliveries']) assert.ok(tools.tools.some(tool => tool.name === name));
+    const mcpDeliveries = await client.callTool({ name: 'list_webhook_deliveries', arguments: { id, limit: 1 } });
+    assert.equal(JSON.parse(mcpDeliveries.content[0].text).data[0].event_id, eventId);
     const fetched = await client.callTool({ name: 'get_webhook', arguments: { id } }); assert.equal(JSON.parse(fetched.content[0].text).id, id);
   } finally {
     await client.close();

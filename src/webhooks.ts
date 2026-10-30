@@ -32,6 +32,22 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
     await env.DB.prepare('INSERT INTO webhooks (id, endpoint, events, signing_secret, created_at) VALUES (?, ?, ?, ?, ?)').bind(id, value.endpoint, JSON.stringify(value.events), secret, new Date().toISOString()).run();
     return json({ object: 'webhook', id, signing_secret: secret }, 201);
   }
+  const deliveries = path.match(/^\/webhooks\/([0-9a-f-]{36})\/deliveries$/);
+  if (deliveries && request.method === 'GET') {
+    const params = new URL(request.url).searchParams; const raw = params.get('limit') ?? '20'; const after = params.get('after');
+    if ([...params.keys()].some(key => !['limit', 'after'].includes(key)) || ['limit', 'after'].some(key => params.getAll(key).length > 1) || !/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100 || after === '') return json({ message: 'Invalid pagination' }, 400);
+    const webhook = await env.DB.prepare('SELECT id FROM webhooks WHERE id = ?').bind(deliveries[1]).first();
+    if (!webhook) return json({ message: 'Not found' }, 404);
+    let condition = ''; let values: string[] = [];
+    if (after !== null) {
+      const anchor = await env.DB.prepare('SELECT d.id, e.occurred_at FROM webhook_deliveries d JOIN delivery_events e ON e.id = d.event_id WHERE d.webhook_id = ? AND d.id = ?').bind(deliveries[1], after).first<{ id: string; occurred_at: string }>();
+      if (!anchor) return json({ message: 'Invalid cursor' }, 400);
+      condition = 'AND (e.occurred_at, d.id) < (?, ?)'; values = [anchor.occurred_at, anchor.id];
+    }
+    const limit = Number(raw);
+    const rows = await env.DB.prepare(`SELECT d.id, d.event_id, d.state, d.attempts, d.next_attempt, d.last_status, e.type, e.occurred_at FROM webhook_deliveries d JOIN delivery_events e ON e.id = d.event_id WHERE d.webhook_id = ? ${condition} ORDER BY e.occurred_at DESC, d.id DESC LIMIT ?`).bind(deliveries[1], ...values, limit + 1).all();
+    return json({ object: 'list', data: rows.results.slice(0, limit), has_more: rows.results.length > limit });
+  }
   const match = path.match(/^\/webhooks\/([0-9a-f-]{36})$/);
   if (!match) return json({ message: 'Not found' }, 404);
   if (request.method === 'GET') {
