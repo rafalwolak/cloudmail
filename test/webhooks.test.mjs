@@ -22,14 +22,14 @@ test('webhook signatures bind identifier, timestamp and exact payload', async ()
 test('dispatch signs events and records success or schedules a retry', async () => {
   const { processWebhooks } = await import('../src/webhooks.ts');
   const secret = 'whsec_' + btoa('01234567890123456789012345678901');
-  for (const status of [204, 503, 'timeout', 'network_error']) {
+  for (const [status, manual] of [[204, false], [503, false], ['timeout', false], ['network_error', false], [503, true]]) {
     const operations = []; const posts = [];
     const env = { DB: { prepare(sql) { return { bind(...args) { return {
       async all() { return { results: [{ id: 'delivery1' }] }; },
       async first() {
         if (sql.includes('RETURNING attempts')) return { attempts: 1 };
         if (sql.includes('RETURNING payload')) return { payload: args[0] };
-        if (sql.includes('JOIN webhooks')) return { id: 'delivery1', attempts: 1, endpoint: 'https://hooks.example.com/event', signing_secret: secret, previous_secret: secret, previous_secret_expires_at: new Date(Date.now() + 3600000).toISOString(), event_id: 'event1', type: 'delivered', recipient: 'user@example.com', occurred_at: '2026-10-30T10:00:00.000Z', details: '{}', provider_id: 'provider1' };
+        if (sql.includes('JOIN webhooks')) return { id: 'delivery1', attempts: 1, manual_once: manual ? 1 : 0, endpoint: 'https://hooks.example.com/event', signing_secret: secret, previous_secret: secret, previous_secret_expires_at: new Date(Date.now() + 3600000).toISOString(), event_id: 'event1', type: 'delivered', recipient: 'user@example.com', occurred_at: '2026-10-30T10:00:00.000Z', details: '{}', provider_id: 'provider1' };
         if (sql.includes('FROM email_history')) return { id: 'email1', sender: 'sender@example.com', subject: 'Hello', created_at: '2026-10-30T09:00:00.000Z', tags: '[{"name":"category","value":"receipt"}]' };
         throw new Error(`Unexpected SQL: ${sql}`);
       },
@@ -47,7 +47,7 @@ test('dispatch signs events and records success or schedules a retry', async () 
     assert.match(operations[0].sql, /INSERT OR IGNORE INTO webhook_attempts/);
     assert.equal(operations[0].args[3], typeof status === 'number' ? status : null); assert.equal(operations[0].args[4], typeof status === 'string' ? status : null);
     assert.match(operations[1].sql, status === 204 ? /state = 'delivered'/ : /UPDATE webhook_deliveries SET state = \?/);
-    if (status !== 204) assert.equal(operations[1].args[0], 'pending');
+    if (status !== 204) assert.equal(operations[1].args[0], manual ? 'failed' : 'pending');
   }
 });
 

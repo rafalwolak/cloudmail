@@ -25,6 +25,14 @@ export async function webhookHeaders(secret: string, id: string, timestamp: numb
 
 export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Response> {
   const path = new URL(request.url).pathname;
+  const eventReplay = path.match(/^\/webhooks\/([0-9a-f-]{36})\/events\/([0-9a-f]{32})\/replay$/);
+  if (eventReplay && request.method === 'POST') {
+    if (new URL(request.url).search) return json({ message: 'Unsupported query parameter' }, 400);
+    const result = await env.DB.prepare("UPDATE webhook_deliveries SET state = 'pending', next_attempt = ?, lease_until = NULL, manual_once = 1 WHERE webhook_id = ? AND id = ? AND state IN ('delivered', 'failed') AND payload IS NOT NULL").bind(new Date().toISOString(), eventReplay[1], eventReplay[2]).run();
+    if (result.meta.changes) return json({ object: 'webhook_event', id: eventReplay[2] });
+    const existing = await env.DB.prepare('SELECT id, payload FROM webhook_deliveries WHERE webhook_id = ? AND id = ?').bind(eventReplay[1], eventReplay[2]).first<{ id: string; payload: string | null }>();
+    return existing ? json({ message: existing.payload === null ? 'Event payload is unavailable' : 'Event delivery is already pending or in progress' }, existing.payload === null ? 422 : 409) : json({ message: 'Not found' }, 404);
+  }
   const eventAttempts = path.match(/^\/webhooks\/([0-9a-f-]{36})\/events\/([0-9a-f]{32})\/attempts$/);
   if (eventAttempts && request.method === 'GET') {
     const params = new URL(request.url).searchParams; const raw = params.get('limit') ?? '20'; const after = params.get('after');
@@ -140,7 +148,7 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
   return json({ message: 'Not found' }, 404);
 }
 
-interface Pending { id: string; endpoint: string; signing_secret: string; previous_secret: string | null; previous_secret_expires_at: string | null; event_id: string; event_type: string | null; type: string; recipient: string; occurred_at: string; details: string; provider_id: string; attempts: number }
+interface Pending { id: string; endpoint: string; signing_secret: string; previous_secret: string | null; previous_secret_expires_at: string | null; event_id: string; event_type: string | null; type: string; recipient: string; occurred_at: string; details: string; provider_id: string; attempts: number; manual_once: number }
 export async function processWebhooks(env: AuthEnv): Promise<void> {
   const now = new Date().toISOString();
   await env.DB.prepare('UPDATE webhooks SET previous_secret = NULL, previous_secret_expires_at = NULL WHERE previous_secret_expires_at <= ?').bind(now).run();
@@ -148,7 +156,7 @@ export async function processWebhooks(env: AuthEnv): Promise<void> {
   for (const { id } of due.results) {
     const claimed = await env.DB.prepare("UPDATE webhook_deliveries SET state = 'sending', lease_until = ?, attempts = attempts + 1 WHERE id = ? AND ((state = 'pending' AND next_attempt <= ?) OR (state = 'sending' AND lease_until <= ?)) RETURNING attempts").bind(new Date(Date.now() + 60000).toISOString(), id, now, now).first<{ attempts: number }>();
     if (!claimed) continue;
-    const row = await env.DB.prepare('SELECT d.id, d.attempts, d.event_type, w.endpoint, w.signing_secret, w.previous_secret, w.previous_secret_expires_at, e.id AS event_id, e.type, e.recipient, e.occurred_at, e.details, e.provider_id FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id JOIN delivery_events e ON e.id = d.event_id WHERE d.id = ?').bind(id).first<Pending>();
+    const row = await env.DB.prepare('SELECT d.id, d.attempts, d.event_type, d.manual_once, w.endpoint, w.signing_secret, w.previous_secret, w.previous_secret_expires_at, e.id AS event_id, e.type, e.recipient, e.occurred_at, e.details, e.provider_id FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id JOIN delivery_events e ON e.id = d.event_id WHERE d.id = ?').bind(id).first<Pending>();
     if (!row) continue;
     const email = row.type === 'received' ? null : await env.DB.prepare('SELECT id, sender, subject, created_at, tags, recipients FROM email_history WHERE provider_id = ?').bind(row.provider_id).first<{ id: string; sender: string; subject: string; created_at: string; tags: string; recipients: string }>();
     const received = row.type === 'received' ? await env.DB.prepare('SELECT id, sender, recipient, subject, created_at, message_id FROM inbound_emails WHERE id = ?').bind(row.event_id.slice('received:'.length)).first<{ id: string; sender: string; recipient: string; subject: string; created_at: string; message_id: string | null }>() : null;
@@ -169,7 +177,7 @@ export async function processWebhooks(env: AuthEnv): Promise<void> {
     if (status !== null && status >= 200 && status < 300) {
       await env.DB.batch([record, env.DB.prepare("UPDATE webhook_deliveries SET state = 'delivered', last_status = ?, lease_until = NULL WHERE id = ? AND state = 'sending' AND attempts = ?").bind(status, id, row.attempts)]);
     } else {
-      const state = row.attempts >= 8 ? 'failed' : 'pending';
+      const state = row.manual_once || row.attempts >= 8 ? 'failed' : 'pending';
       const next = new Date(Date.now() + Math.min(3600000, 60000 * 2 ** (row.attempts - 1))).toISOString();
       await env.DB.batch([record, env.DB.prepare('UPDATE webhook_deliveries SET state = ?, next_attempt = ?, last_status = ?, lease_until = NULL WHERE id = ? AND state = ? AND attempts = ?').bind(state, next, status, id, 'sending', row.attempts)]);
     }
