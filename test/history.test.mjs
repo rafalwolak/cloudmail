@@ -14,7 +14,8 @@ test('accepted messages can be retrieved without claiming delivery', async () =>
   assert.equal(email.id, id);
   assert.equal(email.status, 'accepted');
   assert.equal(email.subject, 'History test');
-  assert.ok(!JSON.stringify(email).includes('Sensitive content'));
+  assert.equal(email.text, 'Sensitive content');
+  assert.equal(email.html, null);
   const list = await fetch(`${base}/emails`, { headers });
   assert.equal(list.status, 200);
   assert.ok((await list.json()).data.some(item => item.id === id));

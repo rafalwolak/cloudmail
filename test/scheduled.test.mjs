@@ -107,3 +107,14 @@ test('cron sends a due email once despite concurrent invocations', { skip: proce
   const history = await (await call(`/emails/${id}`)).json();
   assert.equal(history.status, 'accepted');
 });
+
+test('sent scheduled content remains available after the delivery attempt', async () => {
+  const created = await call('/emails', 'POST', { ...message, scheduled_at: 'in 1 sec' });
+  assert.equal(created.status, 200, await created.clone().text());
+  const { id } = await created.json();
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  assert.equal((await fetch(`${base}/cdn-cgi/local/scheduled`)).status, 200);
+  const details = await (await call(`/emails/${id}`)).json();
+  assert.equal(details.status, 'accepted');
+  assert.equal(details.text, message.text);
+});

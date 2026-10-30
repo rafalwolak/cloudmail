@@ -1,3 +1,4 @@
+import { readSentContent, storeSentContent } from './sent-content';
 import type { AuthEnv } from './auth';
 import type { OutboundEmail } from './email';
 
@@ -14,7 +15,7 @@ export function serializeRecipients(value: string | string[] | undefined): strin
   return JSON.stringify(value === undefined ? [] : Array.isArray(value) ? value : [value]);
 }
 
-export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idempotencyKey?: string): Promise<{ id: string }> {
+export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idempotencyKey?: string, retainContent = true): Promise<{ id: string }> {
   const id = crypto.randomUUID();
   const to = Array.isArray(email.to) ? email.to : [email.to];
   const keyHash = idempotencyKey ? await digest(idempotencyKey) : null;
@@ -30,6 +31,11 @@ export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idem
     if (!existing || existing.request_hash !== requestHash) throw new IdempotencyConflict('invalid_idempotent_request');
     if (existing.status !== 'accepted') throw new IdempotencyConflict('concurrent_or_uncertain_idempotent_request');
     return { id: existing.id };
+  }
+  if (retainContent) {
+    if (!env.INBOUND) throw new Error('Email content storage is unavailable');
+    await storeSentContent(env.INBOUND, id, email);
+    await env.DB.prepare('UPDATE email_history SET body_stored = 1 WHERE id = ?').bind(id).run();
   }
   let result: { messageId: string };
   try {
@@ -96,7 +102,7 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
     return Response.json({ object: 'list', data: result.results.slice(0, Number(raw)).map(event => ({ ...event, details: JSON.parse(event.details) })), has_more: result.results.length > Number(raw) }, { headers: { 'cache-control': 'no-store' } });
   }
   const id = url.pathname.slice('/emails/'.length);
-  const row = await env.DB.prepare(`SELECT ${fields}, provider_id, cc, bcc, reply_to FROM ${tables} WHERE email_history.id = ?`).bind(id).first<HistoryRow & { provider_id: string | null }>();
+  const row = await env.DB.prepare(`SELECT ${fields}, provider_id, cc, bcc, reply_to, body_stored FROM ${tables} WHERE email_history.id = ?`).bind(id).first<HistoryRow & { provider_id: string | null; body_stored: number }>();
   if (!row) return Response.json({ message: 'Not found' }, { status: 404 });
   let html: string | null = null; let text: string | null = null;
   if (row.schedule_state === 'scheduled') {
@@ -111,6 +117,13 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
         text = typeof message.text === 'string' ? message.text : null;
       } catch { return Response.json({ message: 'Scheduled content is unavailable' }, { status: 503, headers: { 'cache-control': 'no-store' } }); }
     }
+  }
+  if (row.body_stored) {
+    try {
+      const content = await readSentContent(env.INBOUND, id);
+      if (!content) throw new Error('Missing email content');
+      html = content.html; text = content.text;
+    } catch { return Response.json({ message: 'Email content is unavailable' }, { status: 503, headers: { 'cache-control': 'no-store' } }); }
   }
   const events = row.provider_id ? await env.DB.prepare('SELECT recipient, type, occurred_at, details FROM delivery_events WHERE provider_id = ? ORDER BY occurred_at ASC, id ASC LIMIT 101').bind(row.provider_id).all<{ recipient: string; type: string; occurred_at: string; details: string }>() : { results: [] }; 
   return Response.json({ ...format(row), html, text, cc: row.cc === null ? null : JSON.parse(row.cc), bcc: row.bcc === null ? null : JSON.parse(row.bcc), reply_to: row.reply_to, delivery_events: events.results.slice(0, 100).map(event => ({ ...event, details: JSON.parse(event.details) })), delivery_events_has_more: events.results.length > 100 }, { headers: { 'cache-control': 'no-store' } });

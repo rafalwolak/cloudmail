@@ -1,0 +1,1 @@
+ALTER TABLE email_history ADD COLUMN body_stored INTEGER NOT NULL DEFAULT 0;
