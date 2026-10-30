@@ -1,6 +1,7 @@
 import { createAuth, type AuthEnv } from './auth';
 import { parseEmail } from './email';
 import { handleMcp } from './mcp';
+import { sendBatch } from './batch';
 import { processDeliveryBatch } from './delivery-events';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
 import { authorizeAdmin, isValidKey, manageKeys, type KeyEnv } from './keys';
@@ -43,11 +44,12 @@ export default {
       return new Response(response.body, { status: response.status, headers });
     }
     if (url.pathname === '/' && request.method === 'GET') return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'", 'x-content-type-options': 'nosniff' } });
-    if (url.pathname !== '/mcp' && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && request.method === 'GET')) return Response.json({ message: 'Not found' }, { status: 404 });
+    if (url.pathname !== '/mcp' && !(url.pathname === '/emails/batch' && request.method === 'POST') && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && request.method === 'GET')) return Response.json({ message: 'Not found' }, { status: 404 });
     const authorization = request.headers.get('Authorization') || '';
     const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
     if (!(env.API_KEY && token === env.API_KEY) && !await isValidKey(env.DB, token, env.ADMIN_EMAIL)) return Response.json({ message: 'Unauthorized' }, { status: 401 });
     if (url.pathname === '/mcp') return handleMcp(request, env);
+    if (url.pathname === '/emails/batch' && request.method === 'POST') return sendBatch(request, env);
     if (request.method === 'GET') return readHistory(request, env);
     let data: unknown;
     try { data = await request.json(); } catch { return Response.json({ message: 'Invalid JSON' }, { status: 400 }); }
