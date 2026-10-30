@@ -20,7 +20,7 @@ function setSignedIn(session) {
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) $('#account').textContent = `Signed in as ${session.user.email}`;
-  else { $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
+  else { resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
 }
 async function loadKeys() {
   const { data } = await api('/api/keys');
@@ -133,6 +133,9 @@ $('#load-more').addEventListener('click', async () => {
   try { await loadHistory(); } catch (error) { $('#history-status').textContent = error.message; }
   finally { button.disabled = false; }
 });
+let editingWebhookId = null;
+function resetWebhookForm() { editingWebhookId = null; $('#webhook-form').reset(); $('#webhook-form-title').textContent = 'Create webhook'; $('#webhook-form button[type=submit]').textContent = 'Create webhook'; $('#cancel-webhook-edit').hidden = true; }
+$('#cancel-webhook-edit').addEventListener('click', () => { resetWebhookForm(); $('#webhook-status').textContent = 'Edit canceled.'; });
 async function loadWebhooks() {
   const result = await api('/api/webhooks'); const list = $('#webhook-list'); list.replaceChildren();
   $('#empty-webhooks').hidden = result.data.length > 0;
@@ -172,6 +175,20 @@ async function loadWebhooks() {
       } catch (error) { content.textContent = `${error.message} Close and reopen to retry.`; }
       finally { delete details.dataset.loading; }
     });
+    const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'text-button'; edit.textContent = 'Edit'; edit.setAttribute('aria-label', `Edit webhook ${webhook.endpoint}`);
+    edit.addEventListener('click', () => {
+      editingWebhookId = webhook.id; $('#webhook-endpoint').value = webhook.endpoint;
+      document.querySelectorAll('#webhook-form input[name=event]').forEach(input => { input.checked = webhook.events.includes(input.value); });
+      $('#webhook-form-title').textContent = 'Edit webhook'; $('#webhook-form button[type=submit]').textContent = 'Save webhook'; $('#cancel-webhook-edit').hidden = false; $('#webhook-endpoint').focus();
+    });
+    const rotate = document.createElement('button'); rotate.type = 'button'; rotate.className = 'text-button'; rotate.textContent = 'Rotate secret'; rotate.setAttribute('aria-label', `Rotate secret for ${webhook.endpoint}`);
+    rotate.addEventListener('click', async () => {
+      if (!window.confirm('Rotate the signing secret? Both secrets remain valid for 24 hours. Copy and configure the new secret.')) return;
+      rotate.disabled = true;
+      try { const result = await api(`/api/webhooks/${encodeURIComponent(webhook.id)}/rotate-secret`, { method: 'POST', body: '{}' }); $('#webhook-secret-value').textContent = result.signing_secret; $('#webhook-secret').hidden = false; $('#webhook-status').textContent = 'Secret rotated. Copy it now and update your receiver within 24 hours.'; }
+      catch (error) { $('#webhook-status').textContent = error.message; }
+      finally { rotate.disabled = false; }
+    });
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'text-button'; remove.textContent = 'Delete webhook';
     remove.setAttribute('aria-label', `Delete webhook ${webhook.endpoint}`);
     remove.addEventListener('click', async () => {
@@ -180,7 +197,7 @@ async function loadWebhooks() {
       try { await api(`/api/webhooks/${encodeURIComponent(webhook.id)}`, { method: 'DELETE' }); await loadWebhooks(); $('#webhook-status').textContent = 'Webhook deleted.'; }
       catch (error) { $('#webhook-status').textContent = error.message; remove.disabled = false; }
     });
-    item.append(endpoint, events, details, remove); list.append(item);
+    item.append(endpoint, events, details, edit, rotate, remove); list.append(item);
   }
 }
 $('#webhook-form').addEventListener('submit', async event => {
@@ -189,9 +206,10 @@ $('#webhook-form').addEventListener('submit', async event => {
   try {
     const events = [...document.querySelectorAll('#webhook-form input[name="event"]:checked')].map(input => input.value);
     if (!events.length) throw new Error('Select at least one event.');
-    const result = await api('/api/webhooks', { method: 'POST', body: JSON.stringify({ endpoint: $('#webhook-endpoint').value, events }) });
-    $('#webhook-secret-value').textContent = result.signing_secret; $('#webhook-secret').hidden = false;
-    $('#webhook-endpoint').value = ''; await loadWebhooks(); $('#webhook-status').textContent = 'Webhook created. Copy the signing secret now.';
+    const editing = editingWebhookId;
+    const result = await api(editing ? `/api/webhooks/${encodeURIComponent(editing)}` : '/api/webhooks', { method: editing ? 'PATCH' : 'POST', body: JSON.stringify({ endpoint: $('#webhook-endpoint').value, events }) });
+    if (!editing) { $('#webhook-secret-value').textContent = result.signing_secret; $('#webhook-secret').hidden = false; }
+    resetWebhookForm(); await loadWebhooks(); $('#webhook-status').textContent = editing ? 'Webhook updated.' : 'Webhook created. Copy the signing secret now.';
   } catch (error) { $('#webhook-status').textContent = error.message; }
   finally { button.disabled = false; }
 });

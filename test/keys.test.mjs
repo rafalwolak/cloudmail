@@ -77,7 +77,7 @@ test('sending-only keys cannot read data or manage resources', { skip: !process.
       assert.notEqual(batch.isError, true);
       const sent = await client.callTool({ name: 'send_email', arguments: body });
       assert.notEqual(sent.isError, true);
-      for (const name of ['list_emails', 'get_email', 'create_template', 'cancel_email', 'create_api_key', 'list_api_keys', 'delete_api_key', 'list_received_emails', 'get_received_email', 'delete_received_email', 'create_webhook', 'list_webhooks', 'delete_webhook', 'replay_webhook_delivery']) {
+      for (const name of ['list_emails', 'get_email', 'create_template', 'cancel_email', 'create_api_key', 'list_api_keys', 'delete_api_key', 'list_received_emails', 'get_received_email', 'delete_received_email', 'create_webhook', 'list_webhooks', 'delete_webhook', 'replay_webhook_delivery', 'update_webhook', 'rotate_webhook_secret']) {
         try { const result = await client.callTool({ name, arguments: {} }); assert.equal(result.isError, true); }
         catch (error) { assert.match(String(error), /not found|unknown|not registered/i); }
       }

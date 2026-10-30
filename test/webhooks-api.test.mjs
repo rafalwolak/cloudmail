@@ -14,8 +14,15 @@ test('webhook API creates private secrets, enqueues delivery events and exposes 
   const eventId = crypto.randomUUID();
   const client = new Client({ name: 'webhooks-test', version: '1.0.0' });
   try {
+    const updated = await fetch(`${base}/webhooks/${id}`, { method: 'PATCH', headers, body: JSON.stringify({ endpoint: 'https://hooks.example.com/updated', events: ['email.delivered', 'email.bounced'] }) });
+    assert.equal(updated.status, 200);
+    const rotated = await fetch(`${base}/webhooks/${id}/rotate-secret`, { method: 'POST', headers });
+    assert.equal(rotated.status, 200);
+    const newSecret = (await rotated.json()).signing_secret; assert.match(newSecret, /^whsec_/); assert.notEqual(newSecret, signing_secret);
+    assert.equal((await fetch(`${base}/webhooks/${id}/rotate-secret`, { method: 'POST', headers })).status, 409);
+    assert.equal((await fetch(`${base}/webhooks/${id}`, { method: 'PATCH', headers, body: JSON.stringify({ endpoint: 'http://localhost' }) })).status, 400);
     const list = await (await fetch(`${base}/webhooks`, { headers })).json();
-    assert.ok(list.data.some(item => item.id === id)); assert.ok(!JSON.stringify(list).includes(signing_secret));
+    assert.ok(list.data.some(item => item.id === id)); assert.ok(!JSON.stringify(list).includes(signing_secret)); assert.ok(!JSON.stringify(list).includes(newSecret));
     assert.equal((await fetch(`${base}/webhooks`, { method: 'POST', headers, body: JSON.stringify({ endpoint: 'http://localhost', events: ['email.delivered'] }) })).status, 400);
     execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--command', `INSERT INTO delivery_events (id, provider_id, recipient, type, occurred_at) VALUES ('${eventId}', 'test-provider', 'recipient@example.com', 'delivered', '2026-10-30T10:00:00.000Z')`], { stdio: 'pipe' });
     const out = execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--json', '--command', `SELECT webhook_id, event_id, state FROM webhook_deliveries WHERE webhook_id = '${id}' AND event_id = '${eventId}'`], { encoding: 'utf8' });
@@ -35,7 +42,7 @@ test('webhook API creates private secrets, enqueues delivery events and exposes 
     assert.equal((await fetch(`${base}/webhooks/${id}/deliveries/${'0'.repeat(32)}/replay`, { method: 'POST', headers })).status, 404);
     assert.equal((await fetch(`${base}/webhooks/${id}/deliveries?after=missing`, { headers })).status, 400);
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers } }));
-    const tools = await client.listTools(); for (const name of ['list_webhooks', 'create_webhook', 'get_webhook', 'delete_webhook', 'list_webhook_deliveries', 'replay_webhook_delivery']) assert.ok(tools.tools.some(tool => tool.name === name));
+    const tools = await client.listTools(); for (const name of ['list_webhooks', 'create_webhook', 'get_webhook', 'delete_webhook', 'list_webhook_deliveries', 'replay_webhook_delivery', 'update_webhook', 'rotate_webhook_secret']) assert.ok(tools.tools.some(tool => tool.name === name));
     const mcpDeliveries = await client.callTool({ name: 'list_webhook_deliveries', arguments: { id, limit: 1 } });
     assert.equal(JSON.parse(mcpDeliveries.content[0].text).data[0].event_id, eventId);
     const replayed = await client.callTool({ name: 'replay_webhook_delivery', arguments: { id, delivery_id: replayId } });
