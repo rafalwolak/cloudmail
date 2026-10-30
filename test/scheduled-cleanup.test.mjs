@@ -1,6 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanOrphanedScheduledPayloads } from '../src/scheduled-cleanup.ts';
+import { cleanCanceledArchives, cleanOrphanedScheduledPayloads } from '../src/scheduled-cleanup.ts';
+
+test('canceled archive cleanup retries failures and only clears markers after deletion', async () => {
+  const cleared = []; const deleted = []; let fail = true;
+  const db = { prepare(sql) { return { async all() { return { results: [{ id: 'first' }, { id: 'second' }] }; }, bind(id) { return { id, sql }; } }; }, async batch(statements) { cleared.push(statements[0].id); } };
+  const bucket = { async delete(key) { if (key === 'sent/first' && fail) throw new Error('R2 unavailable'); deleted.push(key); } };
+  await cleanCanceledArchives(db, bucket);
+  assert.deepEqual(cleared, ['second']); assert.deepEqual(deleted, ['sent/second']);
+  fail = false; await cleanCanceledArchives(db, bucket);
+  assert.deepEqual(cleared, ['second', 'first', 'second']);
+});
 
 test('orphan cleanup retains referenced, recent and unrelated objects and advances the cursor', async () => {
   const now = Date.parse('2031-01-03T00:00:00Z');

@@ -2,7 +2,7 @@ import { storeSentContent } from './sent-content';
 import type { AuthEnv } from './auth';
 import type { OutboundEmail } from './email';
 import { IdempotencyConflict, digest, serializeRecipients } from './history';
-import { cleanOrphanedScheduledPayloads } from './scheduled-cleanup';
+import { cleanCanceledArchives, cleanOrphanedScheduledPayloads } from './scheduled-cleanup';
 
 type ScheduleEnv = AuthEnv & { INBOUND: R2Bucket };
 
@@ -56,7 +56,7 @@ export async function manageSchedule(request: Request, env: ScheduleEnv): Promis
   const [id, cancel] = [match[1], !!match[2]];
   let result: D1Result;
   if (cancel && request.method === 'POST') {
-    result = await env.DB.prepare("UPDATE scheduled_emails SET state = 'canceled', payload = NULL WHERE id = ? AND state = 'scheduled'").bind(id).run();
+    result = await env.DB.prepare("UPDATE scheduled_emails SET state = 'canceled', payload = NULL, archive_cleanup_pending = 1 WHERE id = ? AND state = 'scheduled'").bind(id).run();
   } else if (!cancel && request.method === 'PATCH') {
     let body: unknown; try { body = await request.json(); } catch { return Response.json({ message: 'Invalid JSON' }, { status: 400 }); }
     if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'scheduled_at')) return Response.json({ message: 'Invalid schedule' }, { status: 400 });
@@ -72,6 +72,8 @@ export async function manageSchedule(request: Request, env: ScheduleEnv): Promis
 }
 
 export async function processScheduled(env: ScheduleEnv): Promise<void> {
+  try { await cleanCanceledArchives(env.DB, env.INBOUND); }
+  catch { console.error('Could not scan canceled email archives; cleanup will retry'); }
   try { await cleanOrphanedScheduledPayloads(env.DB, env.INBOUND); }
   catch { console.error('Could not scan orphaned scheduled payloads; cleanup will retry'); }
   const cleanup = await env.DB.prepare("SELECT id, payload_r2_key FROM scheduled_emails WHERE state IN ('accepted', 'unknown', 'canceled') AND payload_r2_key IS NOT NULL LIMIT 20").all<{ id: string; payload_r2_key: string }>();

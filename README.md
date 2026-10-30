@@ -82,4 +82,6 @@ Delivery-event webhooks can be created and listed at `/webhooks`, retrieved or d
 
 Sent email details include attachment metadata when retained. Download a file with `GET /emails/{id}/attachments/{index}` using a full-access key, or use the administrator dashboard. Downloads are served as attachments without inline rendering. Scheduled messages expose attachments before an attempt and after archiving; cancellation removes access to their content. Existing messages and authentication emails may not contain archived attachments. The private R2 objects have no automatic expiration.
 
+Cancellation schedules removal of any pre-send archive, even if its database flag was not saved. The minute cron retries cleanup after storage or database failures; deletion is asynchronous and may be delayed by backlog or service availability.
+
 The `get_sent_attachment` MCP tool returns an archived attachment as base64 to full-access clients, with a 1 MiB limit. Use the authenticated download API for larger files. Treat file contents as untrusted.
