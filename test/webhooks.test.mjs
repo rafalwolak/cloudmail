@@ -30,7 +30,7 @@ test('dispatch signs events and records success or schedules a retry', async () 
         if (sql.includes('RETURNING attempts')) return { attempts: 1 };
         if (sql.includes('RETURNING payload')) return { payload: args[0] };
         if (sql.includes('JOIN webhooks')) return { id: 'delivery1', attempts: 1, endpoint: 'https://hooks.example.com/event', signing_secret: secret, previous_secret: secret, previous_secret_expires_at: new Date(Date.now() + 3600000).toISOString(), event_id: 'event1', type: 'delivered', recipient: 'user@example.com', occurred_at: '2026-10-30T10:00:00.000Z', details: '{}', provider_id: 'provider1' };
-        if (sql.includes('FROM email_history')) return { id: 'email1', sender: 'sender@example.com', subject: 'Hello', tags: '[]' };
+        if (sql.includes('FROM email_history')) return { id: 'email1', sender: 'sender@example.com', subject: 'Hello', created_at: '2026-10-30T09:00:00.000Z', tags: '[{"name":"category","value":"receipt"}]' };
         throw new Error(`Unexpected SQL: ${sql}`);
       },
       async run() { if (!sql.startsWith('UPDATE webhooks SET previous_secret')) operations.push({ sql, args }); },
@@ -42,6 +42,8 @@ test('dispatch signs events and records success or schedules a retry', async () 
     assert.equal(posts[0].options.headers['svix-id'], 'evt_delivery1');
     assert.equal(posts[0].options.headers['svix-signature'].split(' ').length, 2);
     assert.equal(JSON.parse(posts[0].options.body).data.email_id, 'email1');
+    assert.deepEqual(JSON.parse(posts[0].options.body).data.tags, { category: 'receipt' });
+    assert.equal(JSON.parse(posts[0].options.body).data.created_at, '2026-10-30T09:00:00.000Z');
     assert.match(operations[0].sql, /INSERT OR IGNORE INTO webhook_attempts/);
     assert.equal(operations[0].args[3], typeof status === 'number' ? status : null); assert.equal(operations[0].args[4], typeof status === 'string' ? status : null);
     assert.match(operations[1].sql, status === 204 ? /state = 'delivered'/ : /UPDATE webhook_deliveries SET state = \?/);
