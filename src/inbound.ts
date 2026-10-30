@@ -21,17 +21,26 @@ export async function readReceived(request: Request, env: InboundEnv): Promise<R
   if (url.pathname === '/emails/receiving') {
     const params = url.searchParams;
     const raw = params.get('limit') ?? '20';
-    if ([...params.keys()].some(key => !['limit', 'before', 'after'].includes(key)) || ['limit', 'before', 'after'].some(key => params.getAll(key).length > 1) || !/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) return response({ message: 'Invalid pagination' }, 400);
+    const allowedParams = ['limit', 'before', 'after', 'from', 'to', 'subject'];
+    if ([...params.keys()].some(key => !allowedParams.includes(key)) || allowedParams.some(key => params.getAll(key).length > 1) || !/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) return response({ message: 'Invalid pagination or filter' }, 400);
     const before = params.get('before'); const after = params.get('after');
     if ((before !== null && after !== null) || before === '' || after === '') return response({ message: 'Invalid cursor' }, 400);
-    const cursor = before ?? after; let condition = ''; let values: string[] = [];
+    const cursor = before ?? after; const conditions: string[] = []; const values: string[] = [];
+    for (const [param, column] of [['from', 'sender'], ['to', 'recipient'], ['subject', 'subject']]) {
+      const value = params.get(param);
+      if (value !== null) {
+        if (!value.trim() || value.length > 256) return response({ message: 'Invalid filter' }, 400);
+        conditions.push(`instr(lower(${column}), lower(?)) > 0`); values.push(value.trim());
+      }
+    }
     if (cursor !== null) {
       const anchor = await env.DB.prepare('SELECT id, created_at FROM inbound_emails WHERE id = ?').bind(cursor).first<{ id: string; created_at: string }>();
       if (!anchor) return response({ message: 'Invalid cursor' }, 400);
-      condition = before !== null ? 'WHERE (created_at, id) > (?, ?)' : 'WHERE (created_at, id) < (?, ?)';
-      values = [anchor.created_at, anchor.id];
+      conditions.push(before !== null ? '(created_at, id) > (?, ?)' : '(created_at, id) < (?, ?)');
+      values.push(anchor.created_at, anchor.id);
     }
     const direction = before !== null ? 'ASC' : 'DESC'; const limit = Number(raw);
+    const condition = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const rows = await env.DB.prepare(`SELECT id, sender, recipient, subject, created_at FROM inbound_emails ${condition} ORDER BY created_at ${direction}, id ${direction} LIMIT ?`).bind(...values, limit + 1).all();
     const result = rows.results.slice(0, limit); if (before !== null) result.reverse();
     return response({ object: 'list', data: result, has_more: rows.results.length > limit });

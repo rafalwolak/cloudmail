@@ -20,6 +20,7 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     assert.ok(tools.tools.some(tool => tool.name === 'send_email'));
     assert.ok(tools.tools.some(tool => tool.name === 'send_batch'));
     assert.ok(tools.tools.some(tool => tool.name === 'list_received_emails'));
+    assert.ok(tools.tools.find(tool => tool.name === 'list_received_emails').inputSchema.properties.subject);
     assert.ok(tools.tools.some(tool => tool.name === 'get_received_email'));
     assert.equal(tools.tools.find(tool => tool.name === 'get_received_attachment').annotations.readOnlyHint, true);
     assert.equal(tools.tools.find(tool => tool.name === 'delete_received_email').annotations.destructiveHint, true);

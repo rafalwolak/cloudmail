@@ -1,0 +1,23 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
+import { readReceived } from '../src/inbound.ts';
+
+test('filters received messages literally and paginates the filtered result', async () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE inbound_emails (id TEXT, sender TEXT, recipient TEXT, subject TEXT, created_at TEXT, object_key TEXT)');
+  const insert = db.prepare('INSERT INTO inbound_emails VALUES (?, ?, ?, ?, ?, ?)');
+  for (const [id, sender, subject] of [['a', 'alice@example.com', '100% ready'], ['b', 'alice@example.com', '100% shipped'], ['c', 'bob@example.com', '100x ready']]) insert.run(id, sender, 'inbox@example.com', subject, `2030-01-0${id.charCodeAt(0) - 96}`, id);
+  const env = { DB: { prepare(sql) { return { bind(...args) { return { async first() { return db.prepare(sql).get(...args) ?? null; }, async all() { return { results: db.prepare(sql).all(...args) }; } }; } }; } } };
+  const get = query => readReceived(new Request(`https://example.com/emails/receiving?${query}`), env);
+  try {
+    const first = await (await get('from=ALICE&subject=%25&limit=1')).json();
+    assert.deepEqual(first.data.map(item => item.id), ['b']); assert.equal(first.has_more, true);
+    const next = await (await get('from=ALICE&subject=%25&limit=1&after=b')).json();
+    assert.deepEqual(next.data.map(item => item.id), ['a']); assert.equal(next.has_more, false);
+    const previous = await (await get('to=INBOX&subject=%25&limit=1&before=a')).json();
+    assert.deepEqual(previous.data.map(item => item.id), ['b']);
+    assert.equal((await get('from=')).status, 400);
+    assert.equal((await get('from=a&from=b')).status, 400);
+  } finally { db.close(); }
+});
