@@ -42,9 +42,9 @@ export async function readReceived(request: Request, env: InboundEnv): Promise<R
     }
     const direction = before !== null ? 'ASC' : 'DESC'; const limit = Number(raw);
     const condition = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const rows = await env.DB.prepare(`SELECT id, sender, recipient, subject, created_at FROM inbound_emails ${condition} ORDER BY created_at ${direction}, id ${direction} LIMIT ?`).bind(...values, limit + 1).all();
+    const rows = await env.DB.prepare(`SELECT id, sender, recipient, subject, created_at, message_id FROM inbound_emails ${condition} ORDER BY created_at ${direction}, id ${direction} LIMIT ?`).bind(...values, limit + 1).all<{ id: string; sender: string; recipient: string; subject: string; created_at: string; message_id: string | null }>();
     const result = rows.results.slice(0, limit); if (before !== null) result.reverse();
-    return response({ object: 'list', data: result, has_more: rows.results.length > limit });
+    return response({ object: 'list', data: result.map(row => ({ ...row, from: row.sender, to: [row.recipient] })), has_more: rows.results.length > limit });
   }
   const match = url.pathname.match(/^\/emails\/receiving\/([0-9a-f-]{36})(?:\/attachments\/(\d+))?$/);
   if (!match) return response({ message: 'Not found' }, 404);
