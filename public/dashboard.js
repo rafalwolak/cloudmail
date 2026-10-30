@@ -27,16 +27,25 @@ let composeKey = null;
 $('#compose-form').addEventListener('input', () => { composeKey = null; });
 $('#compose-form').addEventListener('submit', async event => {
   event.preventDefault();
-  const form = event.currentTarget; const button = form.querySelector('button'); const message = $('#compose-status');
-  const payload = { from: $('#compose-from').value.trim(), to: $('#compose-to').value.trim(), subject: $('#compose-subject').value, text: $('#compose-text').value };
-  if (!window.confirm(`Send this transactional email to ${payload.to}?`)) return;
-  composeKey ??= crypto.randomUUID(); button.disabled = true; message.textContent = 'Sending…';
+  const form = event.currentTarget; const fields = $('#compose-fields'); const message = $('#compose-status');
+  const parseAddresses = value => value.split(',').map(address => address.trim()).filter(Boolean);
+  const to = parseAddresses($('#compose-to').value); const cc = parseAddresses($('#compose-cc').value); const bcc = parseAddresses($('#compose-bcc').value);
+  const text = $('#compose-text').value; const html = $('#compose-html').value; const files = [...$('#compose-attachments').files];
+  if (!text.trim() && !html.trim()) { message.textContent = 'Provide plain text, HTML or both.'; $('#compose-text').focus(); return; }
+  if (to.length + cc.length + bcc.length > 50) { message.textContent = 'Use at most 50 recipients across To, Cc and Bcc.'; return; }
+  if (files.length > 32 || files.reduce((sum, file) => sum + file.size, 0) > 5 * 1024 * 1024) { message.textContent = 'Use at most 32 files and 5 MiB of attachments. The complete message must also fit Cloudflare limits.'; return; }
+  const payload = { from: $('#compose-from').value.trim(), to, subject: $('#compose-subject').value, ...(text && { text }), ...(html && { html }), ...(cc.length && { cc }), ...(bcc.length && { bcc }), ...($('#compose-reply').value.trim() && { reply_to: $('#compose-reply').value.trim() }) };
+  if (!window.confirm(`Send this transactional email?\nTo: ${to.join(', ')}\nCc: ${cc.join(', ') || 'None'}\nBcc: ${bcc.join(', ') || 'None'}\nSubject: ${payload.subject}`)) return;
+  composeKey ??= crypto.randomUUID(); fields.disabled = true; message.textContent = 'Sending…';
   try {
+    if (files.length) payload.attachments = await Promise.all(files.map(file => new Promise((resolve, reject) => {
+      const reader = new FileReader(); reader.onerror = () => reject(new Error('Could not read attachment.')); reader.onload = () => resolve({ filename: file.name, content: String(reader.result).split(',')[1], content_type: file.type || 'application/octet-stream' }); reader.readAsDataURL(file);
+    })));
     const result = await api('/api/send', { method: 'POST', headers: { 'Idempotency-Key': composeKey }, body: JSON.stringify(payload) });
     form.reset(); composeKey = null; message.textContent = `Accepted by Cloudflare. Email ID: ${result.id}. Delivery is not yet confirmed.`;
     try { await loadHistory(true); } catch { /* The email was accepted even if the history refresh fails. */ }
   } catch (error) { message.textContent = `${error.message} Check history before trying again; sending may be uncertain.`; }
-  finally { button.disabled = false; }
+  finally { fields.disabled = false; }
 });
 let metricsGeneration = 0;
 $('#metrics-form').addEventListener('submit', async event => {
