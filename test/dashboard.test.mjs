@@ -42,3 +42,24 @@ test('verified administrator can read history with a session', { skip: !process.
   assert.equal(detail.status, 200);
   assert.ok(Array.isArray((await detail.json()).delivery_events));
 });
+
+test('dashboard template management requires a session', async () => {
+  assert.equal((await fetch(`${base}/api/templates`)).status, 401);
+});
+
+test('administrator can create and publish a template from dashboard API', { skip: !process.env.TEST_DASHBOARD_ADMIN }, async () => {
+  const response = await fetch(`${base}/api/auth/sign-in/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ email: process.env.TEST_DASHBOARD_ADMIN, password: process.env.TEST_DASHBOARD_PASSWORD }) });
+  assert.equal(response.status, 200);
+  const cookie = response.headers.get('set-cookie').split(';')[0];
+  const headers = { cookie, origin: base, 'content-type': 'application/json' };
+  const create = await fetch(`${base}/api/templates`, { method: 'POST', headers, body: JSON.stringify({ name: 'Dashboard test', html: '<p>Hello</p>' }) });
+  assert.equal(create.status, 200);
+  const { id } = await create.json();
+  const badOrigin = await fetch(`${base}/api/templates/${id}/publish`, { method: 'POST', headers: { ...headers, origin: 'https://attacker.example' } });
+  assert.equal(badOrigin.status, 403);
+  const publish = await fetch(`${base}/api/templates/${id}/publish`, { method: 'POST', headers });
+  assert.equal(publish.status, 200);
+  const detail = await fetch(`${base}/api/templates/${id}`, { headers });
+  assert.equal((await detail.json()).status, 'published');
+  assert.equal((await fetch(`${base}/api/templates/${id}`, { method: 'DELETE', headers })).status, 200);
+});

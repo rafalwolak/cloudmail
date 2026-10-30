@@ -20,7 +20,7 @@ function setSignedIn(session) {
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) $('#account').textContent = `Signed in as ${session.user.email}`;
-  else { $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; }
+  else { $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
 }
 async function loadKeys() {
   const { data } = await api('/api/keys');
@@ -93,6 +93,74 @@ $('#load-more').addEventListener('click', async () => {
   try { await loadHistory(); } catch (error) { $('#history-status').textContent = error.message; }
   finally { button.disabled = false; }
 });
+let templateId = null;
+let templateDirty = false;
+const templateForm = $('#template-form');
+const templateStatus = $('#template-status');
+function confirmDiscard() { return !templateDirty || window.confirm('Discard unsaved template changes?'); }
+function updatePublishButton() { $('#publish-template').disabled = !templateId || templateDirty; }
+function openTemplate(template = null) {
+  templateId = template?.id || null;
+  templateDirty = false;
+  templateForm.reset();
+  $('#template-name').value = template?.name || '';
+  $('#template-from').value = template?.from || '';
+  $('#template-subject').value = template?.subject || '';
+  $('#template-html').value = template?.html || '';
+  $('#template-text').value = template?.text || '';
+  $('#template-variables').value = template?.variables?.length ? JSON.stringify(template.variables, null, 2) : '';
+  $('#template-editor-title').textContent = template ? `Edit ${template.name}` : 'New template';
+  $('#delete-template').hidden = !template;
+  updatePublishButton(); templateForm.hidden = false; $('#template-name').focus();
+}
+async function loadTemplates() {
+  const result = await api('/api/templates');
+  const list = $('#template-list'); list.replaceChildren();
+  $('#empty-templates').hidden = result.data.length > 0;
+  for (const template of result.data) {
+    const item = document.createElement('li');
+    const name = document.createElement('span'); name.textContent = `${template.name} · ${template.status}`;
+    const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'text-button'; edit.textContent = 'Edit';
+    edit.setAttribute('aria-label', `Edit ${template.name}`);
+    edit.addEventListener('click', async () => {
+      if (!confirmDiscard()) return;
+      try { openTemplate(await api(`/api/templates/${encodeURIComponent(template.id)}`)); templateStatus.textContent = ''; }
+      catch (error) { templateStatus.textContent = error.message; }
+    });
+    item.append(name, edit); list.append(item);
+  }
+  if (result.has_more) templateStatus.textContent = 'Only the first 100 templates are shown.';
+}
+$('#new-template').addEventListener('click', () => { if (confirmDiscard()) { openTemplate(); templateStatus.textContent = ''; } });
+$('#cancel-template').addEventListener('click', () => { if (confirmDiscard()) { templateForm.hidden = true; templateDirty = false; $('#new-template').focus(); } });
+templateForm.addEventListener('input', () => { templateDirty = true; updatePublishButton(); });
+templateForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const controls = [...templateForm.querySelectorAll('input, textarea, button')]; controls.forEach(control => { control.disabled = true; });
+  try {
+    let variables = [];
+    try { variables = $('#template-variables').value.trim() ? JSON.parse($('#template-variables').value) : []; }
+    catch { throw new Error('Variables must be valid JSON.'); }
+    if (!Array.isArray(variables)) throw new Error('Variables must be a JSON array.');
+    const body = { name: $('#template-name').value, from: $('#template-from').value, subject: $('#template-subject').value, html: $('#template-html').value, text: $('#template-text').value, variables };
+    const saved = await api(templateId ? `/api/templates/${encodeURIComponent(templateId)}` : '/api/templates', { method: templateId ? 'PATCH' : 'POST', body: JSON.stringify(body) });
+    templateId = saved.id; templateDirty = false; $('#delete-template').hidden = false; updatePublishButton();
+    await loadTemplates(); templateStatus.textContent = 'Draft saved. Publish it to use it for sending.';
+  } catch (error) { templateStatus.textContent = error.message; }
+  finally { controls.forEach(control => { control.disabled = false; }); updatePublishButton(); }
+});
+$('#publish-template').addEventListener('click', async () => {
+  if (!templateId || templateDirty || !window.confirm('Publish this saved draft? Future emails will use it.')) return;
+  const button = $('#publish-template'); button.disabled = true;
+  try { await api(`/api/templates/${encodeURIComponent(templateId)}/publish`, { method: 'POST', body: '{}' }); await loadTemplates(); templateStatus.textContent = 'Template published.'; }
+  catch (error) { templateStatus.textContent = error.message; }
+  finally { updatePublishButton(); }
+});
+$('#delete-template').addEventListener('click', async () => {
+  if (!templateId || !window.confirm('Delete this template and its published version permanently?')) return;
+  try { await api(`/api/templates/${encodeURIComponent(templateId)}`, { method: 'DELETE' }); templateId = null; templateDirty = false; templateForm.hidden = true; await loadTemplates(); templateStatus.textContent = 'Template deleted.'; $('#new-template').focus(); }
+  catch (error) { templateStatus.textContent = error.message; }
+});
 $('#signup-form').addEventListener('submit', async (event) => {
   event.preventDefault(); announce('Creating account…');
   try {
@@ -121,7 +189,7 @@ $('#login-form').addEventListener('submit', async (event) => {
     await api('/api/auth/sign-in/email', { method: 'POST', body: JSON.stringify({ email: $('#email').value, password: $('#password').value }) });
     $('#password').value = '';
     const session = await api('/api/auth/get-session'); setSignedIn(session);
-    await loadKeys(); await loadHistory(true); announce('Signed in.');
+    await loadKeys(); await loadHistory(true); await loadTemplates(); announce('Signed in.');
   } catch (error) { announce(error.message); }
 });
 $('#sign-out').addEventListener('click', async () => {
@@ -156,6 +224,6 @@ async function showSetup() {
 }
 (async () => {
   try { await showSetup(); } catch { announce('Could not load installation setup status.'); }
-  try { if (resetToken) { showView('reset'); return; } if (resetError) { showView('forgot'); announce('This recovery link is invalid or has expired. Request a new one.'); return; } const session = await api('/api/auth/get-session'); setSignedIn(session); if (session) { await loadKeys(); await loadHistory(true); } }
+  try { if (resetToken) { showView('reset'); return; } if (resetError) { showView('forgot'); announce('This recovery link is invalid or has expired. Request a new one.'); return; } const session = await api('/api/auth/get-session'); setSignedIn(session); if (session) { await loadKeys(); await loadHistory(true); await loadTemplates(); } }
   catch (error) { announce(error.message); }
 })();

@@ -34,6 +34,13 @@ export default {
       url.pathname = '/emails' + url.pathname.slice('/api/history'.length);
       return readHistory(new Request(url), env);
     }
+    if (url.pathname === '/api/templates' || url.pathname.startsWith('/api/templates/')) {
+      const admin = await authorizeAdmin(request, env);
+      if (admin instanceof Response) return admin;
+      if (request.method !== 'GET' && request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
+      url.pathname = '/templates' + url.pathname.slice('/api/templates'.length);
+      return handleTemplates(new Request(url, request), env);
+    }
     if (request.method === 'GET' && ['/dashboard', '/dashboard.js', '/dashboard.css'].includes(url.pathname)) {
       const path = url.pathname === '/dashboard' ? '/dashboard.html' : url.pathname;
       const response = await env.ASSETS.fetch(new Request(new URL(path, url), request));

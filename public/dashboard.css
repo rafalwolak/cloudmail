@@ -7,3 +7,5 @@
 .history-list summary{cursor:pointer;color:var(--accent);padding:.5rem 0;min-height:44px}.history-list summary:focus-visible{outline:3px solid var(--accent);outline-offset:4px}.delivery-events{font-size:.875rem;color:var(--muted)}.history-list .delivery-events ul{padding-left:1.25rem}.history-list .delivery-events li{border:0;padding:.25rem 0}
 
 .setup-hint{border-left:3px solid var(--accent);padding:.5rem 1rem;margin-top:1rem;color:var(--muted);font-size:.875rem}.setup-hint p{margin:.25rem 0}.setup-hint strong{color:var(--ink)}
+
+textarea{width:100%;min-width:0;resize:vertical;border:1px solid #667667;background:#101813;color:var(--ink);font:inherit;padding:.85rem}textarea:focus-visible{outline:3px solid var(--accent);outline-offset:4px}.template-actions{display:flex;flex-wrap:wrap;gap:.5rem}button:disabled{opacity:.55;cursor:not-allowed}.template-actions .secondary{margin-top:.5rem}
