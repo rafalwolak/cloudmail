@@ -1,6 +1,7 @@
 import type { AuthEnv } from './auth';
 import type { OutboundEmail } from './email';
 import { IdempotencyConflict, digest, serializeRecipients } from './history';
+import { cleanOrphanedScheduledPayloads } from './scheduled-cleanup';
 
 type ScheduleEnv = AuthEnv & { INBOUND: R2Bucket };
 
@@ -56,6 +57,8 @@ export async function manageSchedule(request: Request, env: ScheduleEnv): Promis
 }
 
 export async function processScheduled(env: ScheduleEnv): Promise<void> {
+  try { await cleanOrphanedScheduledPayloads(env.DB, env.INBOUND); }
+  catch { console.error('Could not scan orphaned scheduled payloads; cleanup will retry'); }
   const cleanup = await env.DB.prepare("SELECT id, payload_r2_key FROM scheduled_emails WHERE state IN ('accepted', 'unknown', 'canceled') AND payload_r2_key IS NOT NULL LIMIT 20").all<{ id: string; payload_r2_key: string }>();
   for (const item of cleanup.results) {
     try {
