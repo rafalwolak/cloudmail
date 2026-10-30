@@ -7,7 +7,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:8787';
 const key = process.env.TEST_API_KEY || 'local-test-key';
 const headers = { authorization: `Bearer ${key}` };
-const sql = command => execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--command', command], { stdio: 'pipe' });
+const sql = command => execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, ...(process.env.TEST_D1_PERSIST ? ['--persist-to', process.env.TEST_D1_PERSIST] : []), '--command', command], { stdio: 'pipe' });
 
 test('metrics count distinct recipient events, respect intervals and are available via MCP', { skip: !process.env.TEST_D1_CONFIG }, async () => {
   const id = crypto.randomUUID();

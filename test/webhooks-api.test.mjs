@@ -24,8 +24,8 @@ test('webhook API creates private secrets, enqueues delivery events and exposes 
     const list = await (await fetch(`${base}/webhooks`, { headers })).json();
     assert.ok(list.data.some(item => item.id === id)); assert.ok(!JSON.stringify(list).includes(signing_secret)); assert.ok(!JSON.stringify(list).includes(newSecret));
     assert.equal((await fetch(`${base}/webhooks`, { method: 'POST', headers, body: JSON.stringify({ endpoint: 'http://localhost', events: ['email.delivered'] }) })).status, 400);
-    execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--command', `INSERT INTO delivery_events (id, provider_id, recipient, type, occurred_at) VALUES ('${eventId}', 'test-provider', 'recipient@example.com', 'delivered', '2026-10-30T10:00:00.000Z')`], { stdio: 'pipe' });
-    const out = execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--json', '--command', `SELECT webhook_id, event_id, state FROM webhook_deliveries WHERE webhook_id = '${id}' AND event_id = '${eventId}'`], { encoding: 'utf8' });
+    execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, ...(process.env.TEST_D1_PERSIST ? ['--persist-to', process.env.TEST_D1_PERSIST] : []), '--command', `INSERT INTO delivery_events (id, provider_id, recipient, type, occurred_at) VALUES ('${eventId}', 'test-provider', 'recipient@example.com', 'delivered', '2026-10-30T10:00:00.000Z')`], { stdio: 'pipe' });
+    const out = execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, ...(process.env.TEST_D1_PERSIST ? ['--persist-to', process.env.TEST_D1_PERSIST] : []), '--json', '--command', `SELECT webhook_id, event_id, state FROM webhook_deliveries WHERE webhook_id = '${id}' AND event_id = '${eventId}'`], { encoding: 'utf8' });
     assert.deepEqual(JSON.parse(out)[0].results, [{ webhook_id: id, event_id: eventId, state: 'pending' }]);
     const deliveries = await fetch(`${base}/webhooks/${id}/deliveries?limit=1`, { headers });
     assert.equal(deliveries.status, 200);
@@ -34,12 +34,12 @@ test('webhook API creates private secrets, enqueues delivery events and exposes 
     const deliveryId = page.data[0].id;
     const snapshot = { type: 'email.delivered', data: { to: ['recipient@example.com'] } };
     const payloadHex = Buffer.from(JSON.stringify(snapshot)).toString('hex');
-    execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--command', `UPDATE webhook_deliveries SET payload = CAST(X'${payloadHex}' AS TEXT) WHERE id = '${deliveryId}'`], { stdio: 'pipe' });
+    execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, ...(process.env.TEST_D1_PERSIST ? ['--persist-to', process.env.TEST_D1_PERSIST] : []), '--command', `UPDATE webhook_deliveries SET payload = CAST(X'${payloadHex}' AS TEXT) WHERE id = '${deliveryId}'`], { stdio: 'pipe' });
     const detailPath = `${base}/webhooks/${id}/deliveries/${deliveryId}`;
     assert.equal((await fetch(detailPath)).status, 401);
     const detail = await (await fetch(detailPath, { headers })).json();
     assert.deepEqual(detail.payload, snapshot);
-    execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--command', `INSERT INTO webhook_attempts (delivery_id, attempt_number, attempted_at, status, error) VALUES ('${deliveryId}', 1, '2026-10-30T10:00:00.000Z', 503, NULL), ('${deliveryId}', 2, '2026-10-30T10:01:00.000Z', NULL, 'timeout')`], { stdio: 'pipe' });
+    execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, ...(process.env.TEST_D1_PERSIST ? ['--persist-to', process.env.TEST_D1_PERSIST] : []), '--command', `INSERT INTO webhook_attempts (delivery_id, attempt_number, attempted_at, status, error) VALUES ('${deliveryId}', 1, '2026-10-30T10:00:00.000Z', 503, NULL), ('${deliveryId}', 2, '2026-10-30T10:01:00.000Z', NULL, 'timeout')`], { stdio: 'pipe' });
     const attemptPath = `${base}/webhooks/${id}/deliveries/${deliveryId}/attempts`;
     assert.equal((await fetch(attemptPath)).status, 401);
     const attemptList = await (await fetch(attemptPath, { headers })).json();
@@ -69,6 +69,6 @@ test('webhook API creates private secrets, enqueues delivery events and exposes 
   } finally {
     await client.close();
     await fetch(`${base}/webhooks/${id}`, { method: 'DELETE', headers });
-    execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--command', `DELETE FROM delivery_events WHERE id = '${eventId}'`], { stdio: 'pipe' });
+    execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, ...(process.env.TEST_D1_PERSIST ? ['--persist-to', process.env.TEST_D1_PERSIST] : []), '--command', `DELETE FROM delivery_events WHERE id = '${eventId}'`], { stdio: 'pipe' });
   }
 });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:8787';
 const headers = { authorization: `Bearer ${process.env.TEST_API_KEY || 'local-test-key'}`, 'content-type': 'application/json' };
-const sql = command => execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--command', command], { stdio: 'pipe' });
+const sql = command => execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, ...(process.env.TEST_D1_PERSIST ? ['--persist-to', process.env.TEST_D1_PERSIST] : []), '--command', command], { stdio: 'pipe' });
 
 test('sent and received lifecycle events enqueue atomically and inbound deletion removes queued data', { skip: !process.env.TEST_D1_CONFIG }, async () => {
   const created = await fetch(`${base}/webhooks`, { method: 'POST', headers, body: JSON.stringify({ endpoint: 'https://hooks.example.com/lifecycle', events: ['email.sent', 'email.received'] }) });

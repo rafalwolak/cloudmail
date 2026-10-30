@@ -5,7 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:8787';
 const token = process.env.TEST_API_KEY || 'local-test-key';
-const sql = command => execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--command', command], { stdio: 'pipe' });
+const sql = command => execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, ...(process.env.TEST_D1_PERSIST ? ['--persist-to', process.env.TEST_D1_PERSIST] : []), '--command', command], { stdio: 'pipe' });
 
 test('received email pages are stable in both directions and accessible through MCP', { skip: !process.env.TEST_D1_CONFIG }, async () => {
   const ids = Array.from({ length: 4 }, () => crypto.randomUUID()).sort();
