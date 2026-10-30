@@ -16,13 +16,18 @@ export async function manageDomains(request: Request, authorization: DomainAutho
   if (!match) return json({ message: 'Not found' }, 404);
   if ([...url.searchParams.keys()].length) return json({ message: 'Unsupported query parameter' }, 400);
   const [, id, dns] = match;
-  if (!((!id && ['GET', 'POST'].includes(request.method)) || (id && !dns && ['GET', 'DELETE'].includes(request.method)) || (id && dns && request.method === 'GET'))) return json({ message: 'Not found' }, 404);
+  if (!((!id && ['GET', 'POST'].includes(request.method)) || (id && !dns && ['GET', 'PATCH', 'DELETE'].includes(request.method)) || (id && dns && request.method === 'GET'))) return json({ message: 'Not found' }, 404);
   if (!authorization?.accessToken || !/^[0-9a-f]{32}$/i.test(authorization.zoneId)) return json({ message: 'Cloudflare domain management is not configured' }, 503);
   let body: string | undefined;
   if (request.method === 'POST') {
     let value: unknown; try { value = await request.json(); } catch { return json({ message: 'Invalid JSON' }, 400); }
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => key !== 'name') || typeof (value as { name?: unknown }).name !== 'string' || !/^(?=.{1,253}$)(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test((value as { name: string }).name)) return json({ message: 'A valid domain name is required' }, 400);
     body = JSON.stringify({ name: (value as { name: string }).name.toLowerCase() });
+  }
+  if (request.method === 'PATCH') {
+    let value: unknown; try { value = await request.json(); } catch { return json({ message: 'Invalid JSON' }, 400); }
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.keys(value).length || Object.entries(value).some(([key, item]) => !['preview_enabled', 'drop_suppressed_recipients'].includes(key) || typeof item !== 'boolean')) return json({ message: 'Invalid domain settings' }, 400);
+    body = JSON.stringify(value);
   }
   try {
     const target = `https://api.cloudflare.com/client/v4/zones/${authorization.zoneId}/email/sending/subdomains${id ? `/${id}` : ''}${dns ?? ''}`;

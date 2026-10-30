@@ -26,6 +26,14 @@ test('domain operations require an administrator-selected zone and use its OAuth
     assert.equal((await manageSelectedZoneDomains(request(), env, 'admin')).status, 200);
     assert.equal(calls, 1);
     const tag = 'b'.repeat(32);
+    globalThis.fetch = async (url, options) => { assert.ok(url.endsWith(`/subdomains/${tag}`)); assert.equal(options.method, 'PATCH'); assert.deepEqual(JSON.parse(options.body), { preview_enabled: false, drop_suppressed_recipients: true }); return Response.json({ success: true, result: { tag, enabled: true, name: 'example.com' } }); };
+    const update = () => new Request(`https://example.com/api/cloudflare/zones/${zone}/domains/${tag}`, { method: 'PATCH', body: JSON.stringify({ preview_enabled: false, drop_suppressed_recipients: true }) });
+    assert.equal((await manageSelectedZoneDomains(update(), env, 'other')).status, 404);
+    assert.equal((await manageSelectedZoneDomains(update(), env, 'admin')).status, 200);
+    for (const body of [{}, { preview_enabled: 'true' }, { enabled: true }]) {
+      const invalid = new Request(`https://example.com/api/cloudflare/zones/${zone}/domains/${tag}`, { method: 'PATCH', body: JSON.stringify(body) });
+      assert.equal((await manageSelectedZoneDomains(invalid, env, 'admin')).status, 400);
+    }
     globalThis.fetch = async (url) => { assert.ok(url.endsWith(`/subdomains/${tag}/dns`)); return Response.json({ success: true, result: [] }); };
     const uppercase = new Request(`https://example.com/api/cloudflare/zones/${zone.toUpperCase()}/domains/${tag.toUpperCase()}/DNS`);
     assert.equal((await manageSelectedZoneDomains(uppercase, env, 'admin')).status, 200);
