@@ -17,9 +17,9 @@ async function requestTokens(params: URLSearchParams, now: number, previousRefre
   return { accessToken: result.access_token, refreshToken, expiresAt: now + result.expires_in * 1000 };
 }
 
-export async function completeCloudflareAuthorization(db: D1Database, secret: string, userId: string, clientId: string, redirectUri: string, state: string, code: string, now = Date.now()): Promise<void> {
+export async function completeCloudflareAuthorization(db: D1Database, secret: string, userId: string, sessionId: string, clientId: string, redirectUri: string, state: string, code: string, now = Date.now()): Promise<void> {
   if (!code || code.length > 4096) throw new Error('Invalid Cloudflare authorization callback');
-  const verifier = await consumeCloudflareOAuthState(db, state, userId, now);
+  const verifier = await consumeCloudflareOAuthState(db, state, userId, sessionId, now);
   if (!verifier) throw new Error('Invalid Cloudflare authorization callback');
   const tokens = await requestTokens(new URLSearchParams({ grant_type: 'authorization_code', client_id: clientId, redirect_uri: redirectUri, code, code_verifier: verifier }), now);
   await replaceCloudflareOAuthConnection(db, secret, userId, tokens);

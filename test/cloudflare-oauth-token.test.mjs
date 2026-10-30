@@ -9,13 +9,13 @@ import { completeCloudflareAuthorization, refreshCloudflareTokens, refreshStored
 async function database() {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec('CREATE TABLE "user" (id TEXT PRIMARY KEY); INSERT INTO "user" VALUES (\'admin\');');
-  for (const file of ['0025_cloudflare_oauth_states.sql', '0026_cloudflare_oauth_connection.sql', '0027_cloudflare_zones.sql']) sqlite.exec(await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8'));
+  for (const file of ['0025_cloudflare_oauth_states.sql', '0026_cloudflare_oauth_connection.sql', '0027_cloudflare_zones.sql', '0028_cloudflare_oauth_session.sql']) sqlite.exec(await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8'));
   return { sqlite, async batch(statements) { sqlite.exec('BEGIN'); try { for (const statement of statements) await statement.run(); sqlite.exec('COMMIT'); } catch (error) { sqlite.exec('ROLLBACK'); throw error; } }, prepare(sql) { return { bind(...args) { return { async run() { const result = sqlite.prepare(sql).run(...args); return { meta: { changes: Number(result.changes) } }; }, async first() { return sqlite.prepare(sql).get(...args) ?? null; } }; } }; } };
 }
 
 test('authorization code exchange consumes state and stores encrypted credentials', async () => {
   const db = await database(), secret = 's'.repeat(40), original = globalThis.fetch;
-  const { state, challenge } = await createCloudflareOAuthState(db, 'admin', 1000);
+  const { state, challenge } = await createCloudflareOAuthState(db, 'admin', 'session', 1000);
   let calls = 0;
   globalThis.fetch = async (url, options) => {
     calls++; assert.equal(url, 'https://dash.cloudflare.com/oauth2/token'); assert.equal(options.redirect, 'manual');
@@ -25,9 +25,9 @@ test('authorization code exchange consumes state and stores encrypted credential
     return Response.json({ access_token: 'access', refresh_token: 'refresh', token_type: 'Bearer', expires_in: 60 });
   };
   try {
-    await completeCloudflareAuthorization(db, secret, 'admin', 'client', 'https://example.com/callback', state, 'code', 1001);
+    await completeCloudflareAuthorization(db, secret, 'admin', 'session', 'client', 'https://example.com/callback', state, 'code', 1001);
     assert.deepEqual(await readCloudflareOAuthTokens(db, secret, 'admin'), { accessToken: 'access', refreshToken: 'refresh', expiresAt: 61001 });
-    await assert.rejects(completeCloudflareAuthorization(db, secret, 'admin', 'client', 'https://example.com/callback', state, 'code', 1001));
+    await assert.rejects(completeCloudflareAuthorization(db, secret, 'admin', 'session', 'client', 'https://example.com/callback', state, 'code', 1001));
     assert.equal(calls, 1);
   } finally { globalThis.fetch = original; db.sqlite.close(); }
 });

@@ -101,7 +101,7 @@ export default {
       const admin = await authorizeAdmin(request, env);
       if (admin instanceof Response) return admin;
       if (request.method !== 'GET' && request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
-      return handleCloudflareOAuth(request, env, admin.id);
+      return handleCloudflareOAuth(request, env, admin.id, admin.sessionId);
     }
     if (url.pathname === '/api/cloudflare/zones' || url.pathname.startsWith('/api/cloudflare/zones/')) {
       const admin = await authorizeAdmin(request, env);
