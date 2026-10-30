@@ -95,3 +95,18 @@ test('dashboard inbox requires an administrator session', { skip: !process.env.T
   assert.equal((await fetch(path, { method: 'DELETE', headers: { cookie, origin: 'https://attacker.example' } })).status, 403);
   assert.equal((await fetch(path, { method: 'DELETE', headers: { cookie, origin: base } })).status, 404);
 });
+
+test('dashboard webhooks require an administrator and reject cross-origin changes', { skip: !process.env.TEST_DASHBOARD_ADMIN }, async () => {
+  assert.equal((await fetch(`${base}/api/webhooks`)).status, 401);
+  const login = await fetch(`${base}/api/auth/sign-in/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin: base }, body: JSON.stringify({ email: process.env.TEST_DASHBOARD_ADMIN, password: process.env.TEST_DASHBOARD_PASSWORD }) });
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const request = { method: 'POST', headers: { cookie, 'content-type': 'application/json', origin: 'https://attacker.example' }, body: JSON.stringify({ endpoint: 'https://hooks.example.com', events: ['email.delivered'] }) };
+  assert.equal((await fetch(`${base}/api/webhooks`, request)).status, 403);
+  request.headers.origin = base;
+  const created = await fetch(`${base}/api/webhooks`, request); assert.equal(created.status, 201);
+  const { id, signing_secret } = await created.json(); assert.match(signing_secret, /^whsec_/);
+  const list = await (await fetch(`${base}/api/webhooks`, { headers: { cookie } })).json();
+  assert.ok(list.data.some(item => item.id === id)); assert.ok(!JSON.stringify(list).includes(signing_secret));
+  assert.equal((await fetch(`${base}/api/webhooks/${id}/deliveries`, { headers: { cookie } })).status, 200);
+  assert.equal((await fetch(`${base}/api/webhooks/${id}`, { method: 'DELETE', headers: { cookie, origin: base } })).status, 200);
+});

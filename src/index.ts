@@ -51,6 +51,13 @@ export default {
       url.pathname = '/emails' + url.pathname.slice('/api/history'.length);
       return request.method === 'GET' ? readHistory(new Request(url), env) : manageSchedule(new Request(url, request), env);
     }
+    if (url.pathname === '/api/webhooks' || url.pathname.startsWith('/api/webhooks/')) {
+      const admin = await authorizeAdmin(request, env);
+      if (admin instanceof Response) return admin;
+      if (request.method !== 'GET' && request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
+      url.pathname = '/webhooks' + url.pathname.slice('/api/webhooks'.length);
+      return manageWebhooks(new Request(url, request), env);
+    }
     if (url.pathname === '/api/templates' || url.pathname.startsWith('/api/templates/')) {
       const admin = await authorizeAdmin(request, env);
       if (admin instanceof Response) return admin;

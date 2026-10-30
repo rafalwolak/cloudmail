@@ -20,7 +20,7 @@ function setSignedIn(session) {
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) $('#account').textContent = `Signed in as ${session.user.email}`;
-  else { $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
+  else { $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
 }
 async function loadKeys() {
   const { data } = await api('/api/keys');
@@ -132,6 +132,64 @@ $('#load-more').addEventListener('click', async () => {
   const button = $('#load-more'); button.disabled = true;
   try { await loadHistory(); } catch (error) { $('#history-status').textContent = error.message; }
   finally { button.disabled = false; }
+});
+async function loadWebhooks() {
+  const result = await api('/api/webhooks'); const list = $('#webhook-list'); list.replaceChildren();
+  $('#empty-webhooks').hidden = result.data.length > 0;
+  for (const webhook of result.data) {
+    const item = document.createElement('li'); const endpoint = document.createElement('strong'); endpoint.textContent = webhook.endpoint;
+    const events = document.createElement('span'); events.textContent = webhook.events.join(', ');
+    const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Delivery attempts';
+    const content = document.createElement('div'); details.append(summary, content);
+    details.addEventListener('toggle', async () => {
+      if (!details.open || details.dataset.loaded || details.dataset.loading) return;
+      details.dataset.loading = 'true'; content.textContent = 'Loading delivery attempts…';
+      try {
+        content.replaceChildren(); const rows = document.createElement('ul'); content.append(rows);
+        const more = document.createElement('button'); more.type = 'button'; more.className = 'text-button'; more.textContent = 'Load more attempts'; let cursor = null;
+        const load = async () => {
+          more.disabled = true;
+          try {
+            const params = new URLSearchParams({ limit: '20' }); if (cursor) params.set('after', cursor);
+            const page = await api(`/api/webhooks/${encodeURIComponent(webhook.id)}/deliveries?${params}`);
+            for (const delivery of page.data) {
+              const row = document.createElement('li'); row.textContent = `${delivery.type} · ${delivery.state} · ${delivery.attempts} attempts${delivery.last_status ? ` · HTTP ${delivery.last_status}` : ''} · ${new Date(delivery.occurred_at).toLocaleString()}`; rows.append(row);
+            }
+            cursor = page.data.at(-1)?.id || cursor; more.hidden = !page.has_more;
+            if (!rows.children.length) { const empty = document.createElement('p'); empty.textContent = 'No delivery attempts yet.'; content.prepend(empty); }
+          } finally { more.disabled = false; }
+        };
+        more.addEventListener('click', async () => { try { await load(); } catch (error) { $('#webhook-status').textContent = error.message; } });
+        content.append(more); await load(); details.dataset.loaded = 'true';
+      } catch (error) { content.textContent = `${error.message} Close and reopen to retry.`; }
+      finally { delete details.dataset.loading; }
+    });
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'text-button'; remove.textContent = 'Delete webhook';
+    remove.setAttribute('aria-label', `Delete webhook ${webhook.endpoint}`);
+    remove.addEventListener('click', async () => {
+      if (!window.confirm('Delete this webhook and its pending deliveries?')) return;
+      remove.disabled = true;
+      try { await api(`/api/webhooks/${encodeURIComponent(webhook.id)}`, { method: 'DELETE' }); await loadWebhooks(); $('#webhook-status').textContent = 'Webhook deleted.'; }
+      catch (error) { $('#webhook-status').textContent = error.message; remove.disabled = false; }
+    });
+    item.append(endpoint, events, details, remove); list.append(item);
+  }
+}
+$('#webhook-form').addEventListener('submit', async event => {
+  event.preventDefault(); const button = $('#webhook-form button[type="submit"]'); button.disabled = true;
+  $('#webhook-secret').hidden = true; $('#webhook-secret-value').textContent = '';
+  try {
+    const events = [...document.querySelectorAll('#webhook-form input[name="event"]:checked')].map(input => input.value);
+    if (!events.length) throw new Error('Select at least one event.');
+    const result = await api('/api/webhooks', { method: 'POST', body: JSON.stringify({ endpoint: $('#webhook-endpoint').value, events }) });
+    $('#webhook-secret-value').textContent = result.signing_secret; $('#webhook-secret').hidden = false;
+    $('#webhook-endpoint').value = ''; await loadWebhooks(); $('#webhook-status').textContent = 'Webhook created. Copy the signing secret now.';
+  } catch (error) { $('#webhook-status').textContent = error.message; }
+  finally { button.disabled = false; }
+});
+$('#copy-webhook-secret').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText($('#webhook-secret-value').textContent); $('#webhook-status').textContent = 'Signing secret copied.'; }
+  catch { $('#webhook-status').textContent = 'Could not copy. Select and copy the secret manually.'; }
 });
 let inboxCursor = null;
 async function loadInbox(reset = false) {
@@ -301,7 +359,7 @@ $('#login-form').addEventListener('submit', async (event) => {
     await api('/api/auth/sign-in/email', { method: 'POST', body: JSON.stringify({ email: $('#email').value, password: $('#password').value }) });
     $('#password').value = '';
     const session = await api('/api/auth/get-session'); setSignedIn(session);
-    await loadKeys(); await loadHistory(true); await loadTemplates(); await loadInbox(true); announce('Signed in.');
+    await loadKeys(); await loadHistory(true); await loadTemplates(); await loadInbox(true); await loadWebhooks(); announce('Signed in.');
   } catch (error) { announce(error.message); }
 });
 $('#sign-out').addEventListener('click', async () => {
@@ -336,6 +394,6 @@ async function showSetup() {
 }
 (async () => {
   try { await showSetup(); } catch { announce('Could not load installation setup status.'); }
-  try { if (resetToken) { showView('reset'); return; } if (resetError) { showView('forgot'); announce('This recovery link is invalid or has expired. Request a new one.'); return; } const session = await api('/api/auth/get-session'); setSignedIn(session); if (session) { await loadKeys(); await loadHistory(true); await loadTemplates(); await loadInbox(true); } }
+  try { if (resetToken) { showView('reset'); return; } if (resetError) { showView('forgot'); announce('This recovery link is invalid or has expired. Request a new one.'); return; } const session = await api('/api/auth/get-session'); setSignedIn(session); if (session) { await loadKeys(); await loadHistory(true); await loadTemplates(); await loadInbox(true); await loadWebhooks(); } }
   catch (error) { announce(error.message); }
 })();
