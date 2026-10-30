@@ -8,7 +8,9 @@ const request = (path, method = 'GET', body) => new Request(`https://cloudmail.e
 
 test('domain API requires authentication and reports missing configuration', async () => {
   const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:8787';
-  assert.equal((await fetch(`${base}/domains`)).status, 401);
+  for (const [path, method] of [['/domains', 'GET'], ['/domains', 'POST'], [`/domains/${tag}`, 'GET'], [`/domains/${tag}`, 'DELETE']]) {
+    assert.equal((await fetch(`${base}${path}`, { method })).status, 401, `${method} ${path}`);
+  }
   const response = await fetch(`${base}/domains`, { headers: { authorization: `Bearer ${process.env.TEST_API_KEY || 'local-test-key'}` } });
   assert.equal(response.status, 503);
 });

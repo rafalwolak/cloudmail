@@ -11,6 +11,7 @@ import { processDeliveryBatch } from './delivery-events';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
 import { readMetrics } from './metrics';
 import { manageDomains } from './domains';
+import { createDomain, deleteDomain, getDomain, listDomains } from './domain-list';
 import { manageSelectedZoneDomains } from './cloudflare-domain-management';
 import { handleCloudflareZones } from './cloudflare-zone-api';
 import { handleCloudflareOAuth } from './cloudflare-oauth-api';
@@ -136,6 +137,16 @@ export default {
     if (!access) return Response.json({ message: 'Unauthorized' }, { status: 401 });
     if (access.permission === 'sending_access' && url.pathname !== '/mcp' && !(request.method === 'POST' && (url.pathname === '/emails' || url.pathname === '/emails/batch'))) return Response.json({ message: 'Forbidden' }, { status: 403 });
     if (url.pathname === '/mcp') return handleMcp(request, env, access);
+    if (url.pathname === '/domains' && ['GET', 'POST'].includes(request.method)) {
+      const owner = await findKeyOwner(env);
+      if (!owner) return Response.json({ message: 'Verified administrator is not configured' }, { status: 503 });
+      return request.method === 'GET' ? listDomains(request, env, owner.id) : createDomain(request, env, owner.id);
+    }
+    if (/^\/domains\/[a-f0-9]{32}$/i.test(url.pathname) && ['GET', 'DELETE'].includes(request.method)) {
+      const owner = await findKeyOwner(env);
+      if (!owner) return Response.json({ message: 'Verified administrator is not configured' }, { status: 503 });
+      return request.method === 'GET' ? getDomain(request, env, owner.id) : deleteDomain(request, env, owner.id);
+    }
     if (url.pathname === '/domains' || url.pathname.startsWith('/domains/')) return manageDomains(request, null);
     if (url.pathname === '/webhooks' || url.pathname.startsWith('/webhooks/')) return manageWebhooks(request, env);
     if (url.pathname === '/api-keys' || url.pathname.startsWith('/api-keys/')) {
