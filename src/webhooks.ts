@@ -25,6 +25,24 @@ export async function webhookHeaders(secret: string, id: string, timestamp: numb
 
 export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Response> {
   const path = new URL(request.url).pathname;
+  const eventAttempts = path.match(/^\/webhooks\/([0-9a-f-]{36})\/events\/([0-9a-f]{32})\/attempts$/);
+  if (eventAttempts && request.method === 'GET') {
+    const params = new URL(request.url).searchParams; const raw = params.get('limit') ?? '20'; const after = params.get('after');
+    if ([...params.keys()].some(key => !['limit', 'after'].includes(key)) || ['limit', 'after'].some(key => params.getAll(key).length > 1) || !/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 100) return json({ message: 'Invalid pagination' }, 400);
+    const delivery = await env.DB.prepare('SELECT id FROM webhook_deliveries WHERE webhook_id = ? AND id = ?').bind(eventAttempts[1], eventAttempts[2]).first();
+    if (!delivery) return json({ message: 'Not found' }, 404);
+    let before = 2147483647;
+    if (after !== null) {
+      const cursor = after.match(/^atmpt_([0-9a-f]{32})_([1-9][0-9]{0,8})$/);
+      if (!cursor || cursor[1] !== eventAttempts[2]) return json({ message: 'Invalid cursor' }, 400);
+      before = Number(cursor[2]);
+      const anchor = await env.DB.prepare('SELECT attempt_number FROM webhook_attempts WHERE delivery_id = ? AND attempt_number = ?').bind(eventAttempts[2], before).first();
+      if (!anchor) return json({ message: 'Invalid cursor' }, 400);
+    }
+    const limit = Number(raw);
+    const rows = await env.DB.prepare('SELECT attempt_number, attempted_at, status, error FROM webhook_attempts WHERE delivery_id = ? AND attempt_number < ? ORDER BY attempt_number DESC LIMIT ?').bind(eventAttempts[2], before, limit + 1).all<{ attempt_number: number; attempted_at: string; status: number | null; error: string | null }>();
+    return json({ object: 'list', has_more: rows.results.length > limit, data: rows.results.slice(0, limit).map(row => ({ id: `atmpt_${eventAttempts[2]}_${row.attempt_number}`, http_status_code: row.status, response: null, sent_at: row.attempted_at, error: row.error })) });
+  }
   const eventsPath = path.match(/^\/webhooks\/([0-9a-f-]{36})\/events(?:\/([0-9a-f]{32}))?$/);
   if (eventsPath && request.method === 'GET') {
     const url = new URL(request.url);
