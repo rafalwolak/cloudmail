@@ -107,6 +107,25 @@ export async function handleTemplates(request: Request, env: AuthEnv): Promise<R
 }
 
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
+function templateValues(declarations: Variable[], input: Record<string, unknown>): Record<string, string> | string {
+  if (Object.keys(input).some(key => !declarations.some(variable => variable.key === key))) return 'Unknown template variable';
+  const values: Record<string, string> = Object.create(null);
+  for (const variable of declarations) {
+    const current = Object.hasOwn(input, variable.key) ? input[variable.key] : variable.fallback_value;
+    if (typeof current !== variable.type || (typeof current === 'number' && !Number.isFinite(current))) return `Missing or invalid template variable: ${variable.key}`;
+    values[variable.key] = String(current);
+  }
+  return values;
+}
+function renderContent(content: string, values: Record<string, string>, html: boolean): string {
+  return content.replace(/\{\{\{([A-Z][A-Z0-9_]*)\}\}\}/g, (_, key: string) => html ? escapeHtml(values[key]) : values[key]);
+}
+export function renderDraftHtml(html: string, declarations: unknown, input: unknown): string | { html: string } {
+  const template = { name: 'Preview', html, variables: declarations };
+  if (!validateTemplate(template) || !object(input)) return 'Invalid template variables or HTML';
+  const values = templateValues(template.variables ?? [], input);
+  return typeof values === 'string' ? values : { html: renderContent(html, values, true) };
+}
 export async function resolveTemplate(value: unknown, env: AuthEnv): Promise<unknown | string> {
   if (!object(value) || !Object.hasOwn(value, 'template')) return value;
   const ref = value.template;
@@ -115,15 +134,9 @@ export async function resolveTemplate(value: unknown, env: AuthEnv): Promise<unk
   if (!row?.published) return 'Template not found or not published';
   const template: Template = JSON.parse(row.published);
   const input = (ref.variables ?? {}) as Record<string, unknown>;
-  const declarations = template.variables ?? [];
-  if (Object.keys(input).some(key => !declarations.some(variable => variable.key === key))) return 'Unknown template variable';
-  const values: Record<string, string> = Object.create(null);
-  for (const variable of declarations) {
-    const current = Object.hasOwn(input, variable.key) ? input[variable.key] : variable.fallback_value;
-    if (typeof current !== variable.type || (typeof current === 'number' && !Number.isFinite(current))) return `Missing or invalid template variable: ${variable.key}`;
-    values[variable.key] = String(current);
-  }
-  const render = (content: string, html: boolean) => content.replace(/\{\{\{([A-Z][A-Z0-9_]*)\}\}\}/g, (_, key: string) => html ? escapeHtml(values[key]) : values[key]);
+  const values = templateValues(template.variables ?? [], input);
+  if (typeof values === 'string') return values;
+  const render = (content: string, html: boolean) => renderContent(content, values, html);
   const { template: _reference, ...fields } = value;
   return { ...fields, from: fields.from ?? template.from, subject: typeof fields.subject === 'string' ? fields.subject : template.subject ? render(template.subject, false) : undefined, reply_to: fields.reply_to ?? template.reply_to, html: render(template.html, true), ...(template.text !== undefined && { text: render(template.text, false) }) };
 }

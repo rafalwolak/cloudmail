@@ -31,3 +31,15 @@ test('preview tokens differ between sessions and signing secrets', async () => {
   assert.notEqual(first, await previewToken('a'.repeat(64), 'session-2'));
   assert.notEqual(first, await previewToken('b'.repeat(64), 'session-1'));
 });
+
+test('preview renders sample variables with sending rules and escapes HTML', async () => {
+  const declarations = [{ key: 'NAME', type: 'string' }, { key: 'COUNT', type: 'number', fallback_value: 3 }];
+  const html = '<p>{{{NAME}}}: {{{COUNT}}}</p>';
+  const form = input => request(new URLSearchParams({ html, token, declarations: JSON.stringify(declarations), variables: JSON.stringify(input) }).toString());
+  const rendered = await previewTemplate(form({ NAME: '<Alex & Co>' }), token);
+  assert.equal(rendered.status, 200);
+  assert.equal(await rendered.text(), '<p>&lt;Alex &amp; Co&gt;: 3</p>');
+  assert.equal((await previewTemplate(form({ NAME: 'Alex', EXTRA: 'x' }), token)).status, 400);
+  assert.equal((await previewTemplate(form({ NAME: 'Alex', COUNT: '3' }), token)).status, 400);
+  assert.equal((await previewTemplate(form({}), token)).status, 400);
+});

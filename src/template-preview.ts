@@ -1,3 +1,5 @@
+import { renderDraftHtml } from './templates.ts';
+
 const MAX_FORM_BYTES = 3_000_000;
 
 export async function previewToken(secret: string, sessionId: string): Promise<string> {
@@ -25,8 +27,17 @@ export async function previewTemplate(request: Request, expectedToken: string): 
   let mismatch = 0;
   for (let i = 0; i < expectedToken.length; i++) mismatch |= tokens[0].charCodeAt(i) ^ expectedToken.charCodeAt(i);
   if (mismatch) return Response.json({ message: 'Invalid preview token' }, { status: 403 });
-  if (values.length !== 1 || [...form.keys()].some(key => key !== 'html' && key !== 'token') || values[0].length > 200000) return Response.json({ message: 'Invalid preview content' }, { status: 400 });
-  return new Response(values[0], { headers: {
+  if (values.length !== 1 || [...form.keys()].some(key => !['html', 'token', 'declarations', 'variables'].includes(key)) || ['declarations', 'variables'].some(key => form.getAll(key).length > 1) || values[0].length > 200000) return Response.json({ message: 'Invalid preview content' }, { status: 400 });
+  let html = values[0];
+  if (form.has('variables')) {
+    let declarations: unknown; let input: unknown;
+    try { declarations = JSON.parse(form.get('declarations') || '[]'); input = JSON.parse(form.get('variables')!); }
+    catch { return Response.json({ message: 'Variables must be valid JSON' }, { status: 400 }); }
+    const rendered = renderDraftHtml(html, declarations, input);
+    if (typeof rendered === 'string') return Response.json({ message: rendered }, { status: 400 });
+    html = rendered.html;
+  }
+  return new Response(html, { headers: {
     'content-type': 'text/html; charset=utf-8',
     'content-security-policy': "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox; base-uri 'none'; form-action 'none'; frame-ancestors 'self'",
     'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
