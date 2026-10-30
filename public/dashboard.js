@@ -7,9 +7,16 @@ async function api(path, options = {}) {
   if (!response.ok) throw new Error(body?.message || 'Request failed. Please try again.');
   return body;
 }
+const views = ['login', 'signup', 'forgot', 'reset', 'dashboard'];
+function showView(view) {
+  for (const name of views) $(`#${name}-view`).hidden = name !== view;
+}
+let resetToken = new URLSearchParams(location.search).get('token');
+const resetError = new URLSearchParams(location.search).get('error');
+if (resetToken || resetError) history.replaceState(null, '', location.pathname);
+document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => { showView(button.dataset.view); announce(''); }));
 function setSignedIn(session) {
-  $('#login-view').hidden = !!session;
-  $('#dashboard-view').hidden = !session;
+  showView(session ? 'dashboard' : 'login');
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) $('#account').textContent = `Signed in as ${session.user.email}`;
@@ -34,6 +41,28 @@ async function loadKeys() {
     item.append(name, revoke); list.append(item);
   }
 }
+$('#signup-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); announce('Creating account…');
+  try {
+    await api('/api/auth/sign-up/email', { method: 'POST', body: JSON.stringify({ name: $('#signup-name').value, email: $('#signup-email').value, password: $('#signup-password').value, callbackURL: '/dashboard' }) });
+    $('#signup-password').value = ''; showView('login');
+    announce('If registration is available, check your email for a verification link.');
+  } catch (error) { announce(error.message); }
+});
+$('#forgot-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); announce('Requesting recovery link…');
+  try {
+    await api('/api/auth/request-password-reset', { method: 'POST', body: JSON.stringify({ email: $('#forgot-email').value, redirectTo: `${location.origin}/dashboard` }) });
+    announce('If an account exists, check your email for a recovery link.');
+  } catch (error) { announce(error.message); }
+});
+$('#reset-form').addEventListener('submit', async (event) => {
+  event.preventDefault(); announce('Saving password…');
+  try {
+    await api('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ token: resetToken, newPassword: $('#new-password').value }) });
+    resetToken = null; $('#new-password').value = ''; showView('login'); announce('Password updated. You can now sign in.');
+  } catch (error) { announce(error.message); }
+});
 $('#login-form').addEventListener('submit', async (event) => {
   event.preventDefault(); announce('Signing in…');
   try {
@@ -60,6 +89,6 @@ $('#copy-key').addEventListener('click', async () => {
   catch { announce('Could not copy. Select and copy the key manually.'); }
 });
 (async () => {
-  try { const session = await api('/api/auth/get-session'); setSignedIn(session); if (session) await loadKeys(); }
+  try { if (resetToken) { showView('reset'); return; } if (resetError) { showView('forgot'); announce('This recovery link is invalid or has expired. Request a new one.'); return; } const session = await api('/api/auth/get-session'); setSignedIn(session); if (session) await loadKeys(); }
   catch (error) { announce(error.message); }
 })();

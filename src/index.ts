@@ -20,6 +20,7 @@ export default {
       const headers = new Headers(response.headers);
       headers.set('content-security-policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
       headers.set('x-content-type-options', 'nosniff');
+      headers.set('referrer-policy', 'no-referrer');
       headers.set('cache-control', 'no-store');
       return new Response(response.body, { status: response.status, headers });
     }

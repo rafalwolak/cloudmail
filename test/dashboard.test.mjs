@@ -10,3 +10,11 @@ test('dashboard exposes a labelled sign-in form and loads its script', async () 
   assert.match(html, /src="\/dashboard\.js"/);
   assert.equal((await fetch(`${base}/dashboard.js`)).status, 200);
 });
+
+test('dashboard provides registration and password recovery forms', async () => {
+  const response = await fetch(`${base}/dashboard`);
+  const html = await response.text();
+  assert.match(html, /id="signup-form"/);
+  assert.match(html, /id="forgot-form"/);
+  assert.match(html, /id="reset-form"/);
+});
