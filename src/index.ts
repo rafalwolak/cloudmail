@@ -8,6 +8,7 @@ import { manageSchedule, processScheduled, scheduleEmail, validateSchedule } fro
 import { handleTemplates, resolveTemplate } from './templates';
 import { processDeliveryBatch } from './delivery-events';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
+import { readMetrics } from './metrics';
 import { authorizeAdmin, findKeyOwner, handleKeyResources, keyPermission, manageKeys, type KeyEnv } from './keys';
 
 interface Env extends AuthEnv, KeyEnv, InboundEnv { API_KEY: string; ASSETS: Fetcher; DELIVERY_QUEUE_NAME?: string }
@@ -49,6 +50,7 @@ export default {
       if (admin instanceof Response) return admin;
       if (request.method !== 'GET' && request.headers.get('origin') !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
       url.pathname = '/emails' + url.pathname.slice('/api/history'.length);
+      if (url.pathname === '/emails/metrics' && request.method === 'GET') return readMetrics(new Request(url), env);
       return request.method === 'GET' ? readHistory(new Request(url), env) : manageSchedule(new Request(url, request), env);
     }
     if (url.pathname === '/api/webhooks' || url.pathname.startsWith('/api/webhooks/')) {
@@ -93,6 +95,7 @@ export default {
     if (url.pathname === '/emails/batch' && request.method === 'POST') return sendBatch(request, env, access.sending_domain);
     if (request.method === 'DELETE' && url.pathname.startsWith('/emails/receiving/')) return deleteReceived(url.pathname.slice('/emails/receiving/'.length), env);
     if (request.method === 'GET' && (url.pathname === '/emails/receiving' || url.pathname.startsWith('/emails/receiving/'))) return readReceived(request, env);
+    if (request.method === 'GET' && url.pathname === '/emails/metrics') return readMetrics(request, env);
     if (request.method === 'GET') return readHistory(request, env);
     if (url.pathname.startsWith('/emails/')) return manageSchedule(request, env);
     let data: unknown;

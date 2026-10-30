@@ -9,6 +9,8 @@ Use the configured Cloudmail MCP server's `send_email` or `send_batch` tools for
 
 Use `list_emails`, `get_email`, and `list_delivery_events` to inspect recorded send attempts. `accepted` means the provider accepted the message, not that it was delivered.
 
+Use `get_email_metrics` for basic counts in a UTC interval. Accepted message counts and per-recipient delivery event counts use different units; do not calculate a rate by dividing them. Missing events do not establish that delivery failed.
+
 Use `list_templates`, `get_template`, `create_template`, `update_template`, `publish_template`, `duplicate_template`, and `delete_template` to manage template drafts and published snapshots. Publishing replaces the live snapshot; deleting removes it permanently. Make changes only when authorized by the user.
 
 For a published template, pass `template: { id, variables }` instead of message bodies. HTML variables are escaped but URL schemes are not validated; do not put untrusted URLs into template attributes.

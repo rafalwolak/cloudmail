@@ -9,6 +9,7 @@ import { deleteReceived, readReceived, type InboundEnv } from './inbound';
 import { handleTemplates, resolveTemplate } from './templates';
 import { manageSchedule, scheduleEmail, validateSchedule } from './scheduled';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
+import { readMetrics } from './metrics';
 
 const addresses = z.union([z.string(), z.array(z.string())]);
 
@@ -105,6 +106,17 @@ export async function handleMcp(request: Request, env: KeyEnv & InboundEnv, acce
     const body = await response.json();
     return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(body) }] };
   };
+  server.registerTool('get_email_metrics', {
+    description: 'Count accepted messages and unique message-recipient pairs for delivery events in a UTC interval. These counts use different units and do not establish delivery rates.',
+    inputSchema: z.object({ start_date: z.string().optional(), end_date: z.string().optional() }).strict(),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async ({ start_date, end_date }) => {
+    const params = new URLSearchParams();
+    if (start_date !== undefined) params.set('start_date', start_date);
+    if (end_date !== undefined) params.set('end_date', end_date);
+    const response = await readMetrics(new Request(new URL(`/emails/metrics?${params}`, env.BETTER_AUTH_URL)), env);
+    return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
+  });
   server.registerTool('list_emails', {
     description: 'List recorded email attempts. Accepted means accepted by Cloudflare, not confirmed delivered.',
     inputSchema: z.object({ limit: z.number().int().min(1).max(100).optional(), before: z.string().optional(), after: z.string().optional() }).strict(),
