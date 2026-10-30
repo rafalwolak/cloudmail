@@ -59,14 +59,14 @@ export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idem
   return { id };
 }
 
-interface HistoryRow { id: string; sender: string; recipients: string; subject: string; status: string; created_at: string; tags: string; cc: string | null; bcc: string | null; reply_to: string | null; schedule_state: string | null; scheduled_at: string | null }
+interface HistoryRow { id: string; sender: string; recipients: string; subject: string; status: string; created_at: string; tags: string; cc: string | null; bcc: string | null; reply_to: string | null; schedule_state: string | null; scheduled_at: string | null; last_event: string | null }
 function format(row: HistoryRow) {
-  return { id: row.id, from: row.sender, to: JSON.parse(row.recipients), subject: row.subject, status: row.schedule_state ?? row.status, scheduled_at: row.scheduled_at, created_at: row.created_at, tags: JSON.parse(row.tags) };
+  return { id: row.id, from: row.sender, to: JSON.parse(row.recipients), subject: row.subject, status: row.schedule_state ?? row.status, scheduled_at: row.scheduled_at, created_at: row.created_at, tags: JSON.parse(row.tags), cc: row.cc === null ? null : JSON.parse(row.cc), bcc: row.bcc === null ? null : JSON.parse(row.bcc), reply_to: row.reply_to, last_event: row.last_event };
 }
 
 export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2Bucket }): Promise<Response> {
   const url = new URL(request.url);
-  const fields = "email_history.id, sender, recipients, subject, status, created_at, tags, scheduled_emails.state AS schedule_state, scheduled_at";
+  const fields = "email_history.id, sender, recipients, subject, status, created_at, tags, cc, bcc, reply_to, scheduled_emails.state AS schedule_state, scheduled_at, (SELECT type FROM delivery_events WHERE provider_id = email_history.provider_id ORDER BY occurred_at DESC, id DESC LIMIT 1) AS last_event";
   const tables = 'email_history LEFT JOIN scheduled_emails ON scheduled_emails.id = email_history.id';
   if (url.pathname === '/emails') {
     const params = url.searchParams;
@@ -110,7 +110,7 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
     return Response.json({ object: 'list', data: result.results.slice(0, Number(raw)).map(event => ({ ...event, details: JSON.parse(event.details) })), has_more: result.results.length > Number(raw) }, { headers: { 'cache-control': 'no-store' } });
   }
   const id = url.pathname.slice('/emails/'.length);
-  const row = await env.DB.prepare(`SELECT ${fields}, provider_id, cc, bcc, reply_to, body_stored FROM ${tables} WHERE email_history.id = ?`).bind(id).first<HistoryRow & { provider_id: string | null; body_stored: number }>();
+  const row = await env.DB.prepare(`SELECT ${fields}, provider_id, body_stored FROM ${tables} WHERE email_history.id = ?`).bind(id).first<HistoryRow & { provider_id: string | null; body_stored: number }>();
   if (!row) return Response.json({ message: 'Not found' }, { status: 404 });
   let html: string | null = null; let text: string | null = null;
   if (row.schedule_state === 'scheduled') {
@@ -134,5 +134,5 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
     } catch { return Response.json({ message: 'Email content is unavailable' }, { status: 503, headers: { 'cache-control': 'no-store' } }); }
   }
   const events = row.provider_id ? await env.DB.prepare('SELECT recipient, type, occurred_at, details FROM delivery_events WHERE provider_id = ? ORDER BY occurred_at ASC, id ASC LIMIT 101').bind(row.provider_id).all<{ recipient: string; type: string; occurred_at: string; details: string }>() : { results: [] }; 
-  return Response.json({ ...format(row), html, text, cc: row.cc === null ? null : JSON.parse(row.cc), bcc: row.bcc === null ? null : JSON.parse(row.bcc), reply_to: row.reply_to, delivery_events: events.results.slice(0, 100).map(event => ({ ...event, details: JSON.parse(event.details) })), delivery_events_has_more: events.results.length > 100 }, { headers: { 'cache-control': 'no-store' } });
+  return Response.json({ object: 'email', ...format(row), html, text, delivery_events: events.results.slice(0, 100).map(event => ({ ...event, details: JSON.parse(event.details) })), delivery_events_has_more: events.results.length > 100 }, { headers: { 'cache-control': 'no-store' } });
 }

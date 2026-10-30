@@ -11,14 +11,21 @@ test('accepted messages can be retrieved without claiming delivery', async () =>
   const retrieved = await fetch(`${base}/emails/${encodeURIComponent(id)}`, { headers });
   assert.equal(retrieved.status, 200);
   const email = await retrieved.json();
+  assert.equal(email.object, 'email');
   assert.equal(email.id, id);
+  assert.equal(email.last_event, null);
   assert.equal(email.status, 'accepted');
   assert.equal(email.subject, 'History test');
   assert.equal(email.text, 'Sensitive content');
   assert.equal(email.html, null);
   const list = await fetch(`${base}/emails`, { headers });
   assert.equal(list.status, 200);
-  assert.ok((await list.json()).data.some(item => item.id === id));
+  const listed = (await list.json()).data.find(item => item.id === id);
+  assert.ok(listed);
+  assert.deepEqual(listed.cc, []);
+  assert.deepEqual(listed.bcc, []);
+  assert.equal(listed.reply_to, null);
+  assert.equal(listed.last_event, null);
 });
 
 test('email history requires authorization', async () => {
@@ -55,4 +62,16 @@ test('history uses stable before and after cursors', async () => {
   assert.deepEqual(previous.data.map(email => email.id), first.data.map(email => email.id));
   assert.equal((await fetch(`${base}/emails?before=a&after=b`, { headers })).status, 400);
   assert.equal((await fetch(`${base}/emails?after=missing`, { headers })).status, 400);
+});
+
+test('history reports the latest recorded recipient event', { skip: !process.env.TEST_D1_CONFIG || !process.env.TEST_D1_PERSIST }, async () => {
+  const { execFileSync } = await import('node:child_process');
+  const send = await fetch(`${base}/emails`, { method: 'POST', headers, body: JSON.stringify({ from: 'sender@example.com', to: 'recipient@example.com', subject: 'Last event', text: 'Hello' }) });
+  assert.equal(send.status, 200);
+  const { id } = await send.json();
+  const sql = `INSERT INTO delivery_events (id, provider_id, recipient, type, occurred_at) SELECT '${id}-1', provider_id, 'recipient@example.com', 'delivered', '2030-01-01T00:00:00Z' FROM email_history WHERE id = '${id}'; INSERT INTO delivery_events (id, provider_id, recipient, type, occurred_at) SELECT '${id}-2', provider_id, 'recipient@example.com', 'bounced', '2030-01-02T00:00:00Z' FROM email_history WHERE id = '${id}'`;
+  execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--persist-to', process.env.TEST_D1_PERSIST, '--command', sql], { stdio: 'ignore' });
+  assert.equal((await (await fetch(`${base}/emails/${id}`, { headers })).json()).last_event, 'bounced');
+  const list = await (await fetch(`${base}/emails?limit=100`, { headers })).json();
+  assert.equal(list.data.find(item => item.id === id).last_event, 'bounced');
 });
