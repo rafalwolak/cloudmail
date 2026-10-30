@@ -31,6 +31,12 @@ test('webhook API creates private secrets, enqueues delivery events and exposes 
     assert.equal(deliveries.status, 200);
     const page = await deliveries.json(); assert.equal(page.data.length, 1);
     assert.equal(page.data[0].state, 'pending'); assert.equal(page.data[0].event_id, eventId);
+    const deliveryId = page.data[0].id;
+    execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, '--command', `INSERT INTO webhook_attempts (delivery_id, attempt_number, attempted_at, status, error) VALUES ('${deliveryId}', 1, '2026-10-30T10:00:00.000Z', 503, NULL), ('${deliveryId}', 2, '2026-10-30T10:01:00.000Z', NULL, 'timeout')`], { stdio: 'pipe' });
+    const attemptPath = `${base}/webhooks/${id}/deliveries/${deliveryId}/attempts`;
+    assert.equal((await fetch(attemptPath)).status, 401);
+    const attemptList = await (await fetch(attemptPath, { headers })).json();
+    assert.equal(attemptList.data.length, 2); assert.equal(attemptList.data[0].error, 'timeout'); assert.equal(attemptList.data[1].status, 503);
     assert.ok(!JSON.stringify(page).includes(signing_secret));
     const replay = await fetch(`${base}/webhooks/${id}/deliveries/${page.data[0].id}/replay`, { method: 'POST', headers });
     assert.equal(replay.status, 201);
@@ -45,6 +51,8 @@ test('webhook API creates private secrets, enqueues delivery events and exposes 
     const tools = await client.listTools(); for (const name of ['list_webhooks', 'create_webhook', 'get_webhook', 'delete_webhook', 'list_webhook_deliveries', 'replay_webhook_delivery', 'update_webhook', 'rotate_webhook_secret']) assert.ok(tools.tools.some(tool => tool.name === name));
     const mcpDeliveries = await client.callTool({ name: 'list_webhook_deliveries', arguments: { id, limit: 1 } });
     assert.equal(JSON.parse(mcpDeliveries.content[0].text).data[0].event_id, eventId);
+    const mcpAttempts = await client.callTool({ name: 'list_webhook_attempts', arguments: { id, delivery_id: deliveryId } });
+    assert.deepEqual(JSON.parse(mcpAttempts.content[0].text), attemptList);
     const replayed = await client.callTool({ name: 'replay_webhook_delivery', arguments: { id, delivery_id: replayId } });
     assert.notEqual(replayed.isError, true);
     const fetched = await client.callTool({ name: 'get_webhook', arguments: { id } }); assert.equal(JSON.parse(fetched.content[0].text).id, id);

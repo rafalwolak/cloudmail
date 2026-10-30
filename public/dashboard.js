@@ -226,6 +226,20 @@ async function loadWebhooks() {
             const page = await api(`/api/webhooks/${encodeURIComponent(webhook.id)}/deliveries?${params}`);
             for (const delivery of page.data) {
               const row = document.createElement('li'); const label = document.createElement('span'); label.textContent = `${delivery.type} · ${delivery.state} · ${delivery.attempts} attempts${delivery.last_status ? ` · HTTP ${delivery.last_status}` : ''} · ${new Date(delivery.occurred_at).toLocaleString()}`;
+              const attemptDetails = document.createElement('details'); const attemptSummary = document.createElement('summary'); attemptSummary.textContent = 'Attempt history';
+              const attemptContent = document.createElement('div'); attemptDetails.append(attemptSummary, attemptContent);
+              attemptDetails.addEventListener('toggle', async () => {
+                if (!attemptDetails.open || attemptDetails.dataset.loaded || attemptDetails.dataset.loading) return;
+                attemptDetails.dataset.loading = 'true'; attemptContent.textContent = 'Loading attempt history…';
+                try {
+                  const result = await api(`/api/webhooks/${encodeURIComponent(webhook.id)}/deliveries/${encodeURIComponent(delivery.id)}/attempts`);
+                  attemptContent.replaceChildren();
+                  if (!result.data.length) attemptContent.textContent = 'No individual attempts recorded. Older attempts are unavailable.';
+                  for (const attempt of result.data) { const line = document.createElement('p'); line.textContent = `Attempt ${attempt.attempt_number} · ${new Date(attempt.attempted_at).toLocaleString()} · ${attempt.status === null ? attempt.error : `HTTP ${attempt.status}`}`; attemptContent.append(line); }
+                  attemptDetails.dataset.loaded = 'true';
+                } catch (error) { attemptContent.textContent = `${error.message} Close and reopen to retry.`; }
+                finally { delete attemptDetails.dataset.loading; }
+              });
               const replay = document.createElement('button'); replay.type = 'button'; replay.className = 'text-button'; replay.textContent = 'Replay'; replay.setAttribute('aria-label', `Replay ${delivery.type} delivery ${delivery.id}`);
               replay.addEventListener('click', async () => {
                 if (!window.confirm('Queue another delivery of this event? The existing retry schedule will continue.')) return;
@@ -233,7 +247,7 @@ async function loadWebhooks() {
                 try { await api(`/api/webhooks/${encodeURIComponent(webhook.id)}/deliveries/${encodeURIComponent(delivery.id)}/replay`, { method: 'POST', body: '{}' }); $('#webhook-status').textContent = 'Replay queued. Close and reopen delivery attempts to refresh.'; details.dataset.loaded = ''; }
                 catch (error) { $('#webhook-status').textContent = error.message; replay.disabled = false; }
               });
-              row.append(label, replay); rows.append(row);
+              row.append(label, attemptDetails, replay); rows.append(row);
             }
             cursor = page.data.at(-1)?.id || cursor; more.hidden = !page.has_more;
             if (!rows.children.length) { const empty = document.createElement('p'); empty.textContent = 'No delivery attempts yet.'; content.prepend(empty); }

@@ -54,6 +54,15 @@ export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Re
     const result = await env.DB.prepare("INSERT INTO webhook_deliveries (id, webhook_id, event_id, next_attempt, replay_of) SELECT ?, webhook_id, event_id, ?, id FROM webhook_deliveries WHERE webhook_id = ? AND id = ?").bind(id, new Date().toISOString(), replay[1], replay[2]).run();
     return result.meta.changes ? json({ id, replay_of: replay[2] }, 201) : json({ message: 'Not found' }, 404);
   }
+  const attempts = path.match(/^\/webhooks\/([0-9a-f-]{36})\/deliveries\/([0-9a-f]{32})\/attempts$/);
+  if (attempts && request.method === 'GET') {
+    const params = new URL(request.url).searchParams;
+    if ([...params.keys()].length) return json({ message: 'Unsupported query parameter' }, 400);
+    const delivery = await env.DB.prepare('SELECT id FROM webhook_deliveries WHERE webhook_id = ? AND id = ?').bind(attempts[1], attempts[2]).first();
+    if (!delivery) return json({ message: 'Not found' }, 404);
+    const rows = await env.DB.prepare('SELECT attempt_number, attempted_at, status, error FROM webhook_attempts WHERE delivery_id = ? ORDER BY attempt_number DESC').bind(attempts[2]).all();
+    return json({ object: 'list', data: rows.results });
+  }
   const deliveries = path.match(/^\/webhooks\/([0-9a-f-]{36})\/deliveries$/);
   if (deliveries && request.method === 'GET') {
     const params = new URL(request.url).searchParams; const raw = params.get('limit') ?? '20'; const after = params.get('after');
@@ -104,19 +113,21 @@ export async function processWebhooks(env: AuthEnv): Promise<void> {
     const email = row.type === 'received' ? null : await env.DB.prepare('SELECT id, sender, subject, created_at, tags, recipients FROM email_history WHERE provider_id = ?').bind(row.provider_id).first<{ id: string; sender: string; subject: string; created_at: string; tags: string; recipients: string }>();
     const received = row.type === 'received' ? await env.DB.prepare('SELECT id, sender, recipient, subject, created_at FROM inbound_emails WHERE id = ?').bind(row.event_id.slice('received:'.length)).first<{ id: string; sender: string; recipient: string; subject: string; created_at: string }>() : null;
     const payload = JSON.stringify({ type: `email.${row.type}`, created_at: row.occurred_at, data: { email_id: received?.id ?? email?.id ?? null, from: received?.sender ?? email?.sender ?? null, to: row.type === 'sent' && email?.recipients ? JSON.parse(email.recipients) : [row.recipient], subject: received?.subject ?? email?.subject ?? null, tags: email ? JSON.parse(email.tags) : [], details: JSON.parse(row.details) } });
-    let status: number | null = null;
+    let status: number | null = null; let error: string | null = null;
+    const attemptedAt = new Date().toISOString();
     try {
       const headers = await webhookHeaders(row.signing_secret, `evt_${row.id}`, Math.floor(Date.now() / 1000), payload, row.previous_secret && row.previous_secret_expires_at && row.previous_secret_expires_at > new Date().toISOString() ? row.previous_secret : undefined);
       const result = await fetch(row.endpoint, { method: 'POST', headers, body: payload, redirect: 'manual', signal: AbortSignal.timeout(5000) });
       status = result.status;
       await result.body?.cancel();
-    } catch { /* Network failures are retried with the same event ID. */ }
+    } catch (cause) { if (status === null) error = cause instanceof Error && ['TimeoutError', 'AbortError'].includes(cause.name) ? 'timeout' : 'network_error'; }
+    const record = env.DB.prepare("INSERT OR IGNORE INTO webhook_attempts (delivery_id, attempt_number, attempted_at, status, error) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM webhook_deliveries WHERE id = ? AND state = 'sending' AND attempts = ?)").bind(id, row.attempts, attemptedAt, status, error, id, row.attempts);
     if (status !== null && status >= 200 && status < 300) {
-      await env.DB.prepare("UPDATE webhook_deliveries SET state = 'delivered', last_status = ?, lease_until = NULL WHERE id = ? AND state = 'sending' AND attempts = ?").bind(status, id, row.attempts).run();
+      await env.DB.batch([record, env.DB.prepare("UPDATE webhook_deliveries SET state = 'delivered', last_status = ?, lease_until = NULL WHERE id = ? AND state = 'sending' AND attempts = ?").bind(status, id, row.attempts)]);
     } else {
       const state = row.attempts >= 8 ? 'failed' : 'pending';
       const next = new Date(Date.now() + Math.min(3600000, 60000 * 2 ** (row.attempts - 1))).toISOString();
-      await env.DB.prepare('UPDATE webhook_deliveries SET state = ?, next_attempt = ?, last_status = ?, lease_until = NULL WHERE id = ? AND state = ? AND attempts = ?').bind(state, next, status, id, 'sending', row.attempts).run();
+      await env.DB.batch([record, env.DB.prepare('UPDATE webhook_deliveries SET state = ?, next_attempt = ?, last_status = ?, lease_until = NULL WHERE id = ? AND state = ? AND attempts = ?').bind(state, next, status, id, 'sending', row.attempts)]);
     }
   }
 }

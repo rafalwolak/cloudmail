@@ -22,7 +22,7 @@ test('webhook signatures bind identifier, timestamp and exact payload', async ()
 test('dispatch signs events and records success or schedules a retry', async () => {
   const { processWebhooks } = await import('../src/webhooks.ts');
   const secret = 'whsec_' + btoa('01234567890123456789012345678901');
-  for (const status of [204, 503]) {
+  for (const status of [204, 503, 'timeout', 'network_error']) {
     const operations = []; const posts = [];
     const env = { DB: { prepare(sql) { return { bind(...args) { return {
       async all() { return { results: [{ id: 'delivery1' }] }; },
@@ -33,16 +33,18 @@ test('dispatch signs events and records success or schedules a retry', async () 
         throw new Error(`Unexpected SQL: ${sql}`);
       },
       async run() { if (!sql.startsWith('UPDATE webhooks SET previous_secret')) operations.push({ sql, args }); },
-    }; } }; } } };
+    }; } }; }, async batch(statements) { for (const statement of statements) await statement.run(); } } };
     const original = globalThis.fetch;
-    globalThis.fetch = async (url, options) => { posts.push({ url, options }); return new Response(null, { status }); };
+    globalThis.fetch = async (url, options) => { posts.push({ url, options }); if (typeof status === 'string') throw new DOMException('failure', status === 'timeout' ? 'TimeoutError' : 'NetworkError'); return new Response(null, { status }); };
     try { await processWebhooks(env); } finally { globalThis.fetch = original; }
     assert.equal(posts.length, 1); assert.equal(posts[0].options.redirect, 'manual');
     assert.equal(posts[0].options.headers['svix-id'], 'evt_delivery1');
     assert.equal(posts[0].options.headers['svix-signature'].split(' ').length, 2);
     assert.equal(JSON.parse(posts[0].options.body).data.email_id, 'email1');
-    assert.match(operations[0].sql, status === 204 ? /state = 'delivered'/ : /UPDATE webhook_deliveries SET state = \?/);
-    if (status === 503) assert.equal(operations[0].args[0], 'pending');
+    assert.match(operations[0].sql, /INSERT OR IGNORE INTO webhook_attempts/);
+    assert.equal(operations[0].args[3], typeof status === 'number' ? status : null); assert.equal(operations[0].args[4], typeof status === 'string' ? status : null);
+    assert.match(operations[1].sql, status === 204 ? /state = 'delivered'/ : /UPDATE webhook_deliveries SET state = \?/);
+    if (status !== 204) assert.equal(operations[1].args[0], 'pending');
   }
 });
 
@@ -60,7 +62,7 @@ test('lifecycle webhooks carry correct metadata without message bodies', async (
         if (sql.includes('FROM inbound_emails')) return { id: 'email1', sender: 'sender@example.com', recipient: 'first@example.com', subject: 'Received' };
         throw new Error(`Unexpected SQL: ${sql}`);
       }, async run() {},
-    }; } }; } } };
+    }; } }; }, async batch(statements) { for (const statement of statements) await statement.run(); } } };
     const original = globalThis.fetch;
     globalThis.fetch = async (_url, options) => { posts.push(JSON.parse(options.body)); return new Response(null, { status: 204 }); };
     try { await processWebhooks(env); } finally { globalThis.fetch = original; }
