@@ -60,6 +60,30 @@ test('scheduled bodies stored in R2 are available until cancellation', async () 
   assert.equal((await (await call(`/emails/${id}`)).json()).text, null);
 });
 
+test('scheduled attachments are available for review until cancellation', async () => {
+  for (const size of [5, 1600000]) {
+    const content = Buffer.alloc(size, 65).toString('base64');
+    const created = await call('/emails', 'POST', { ...message, scheduled_at: 'in 10 min', attachments: [{ filename: 'review.txt', content }] });
+    assert.equal(created.status, 200, await created.clone().text());
+    const { id } = await created.json();
+    const detail = await (await call(`/emails/${id}`)).json();
+    assert.deepEqual(detail.attachments, [{ id: '0', filename: 'review.txt', content_type: 'text/plain', size }]);
+    const file = await call(`/emails/${id}/attachments/0`);
+    assert.equal(file.status, 200); assert.equal((await file.arrayBuffer()).byteLength, size);
+    assert.equal((await call(`/emails/${id}/cancel`, 'POST', {})).status, 200);
+    assert.equal((await call(`/emails/${id}/attachments/0`)).status, 404);
+  }
+});
+
+test('canceled schedules do not expose a previously archived body flag', { skip: !process.env.TEST_D1_CONFIG }, async () => {
+  const created = await call('/emails', 'POST', { ...message, scheduled_at: 'in 10 min', attachments: [{ filename: 'review.txt', content: 'SGVsbG8=' }] });
+  const { id } = await created.json();
+  assert.equal((await call(`/emails/${id}/cancel`, 'POST', {})).status, 200);
+  execFileSync('npx', ['wrangler', 'd1', 'execute', 'DB', '--local', '--config', process.env.TEST_D1_CONFIG, ...(process.env.TEST_D1_PERSIST ? ['--persist-to', process.env.TEST_D1_PERSIST] : []), '--command', `UPDATE email_history SET body_stored = 1 WHERE id = '${id}'`], { stdio: 'pipe' });
+  assert.equal((await call(`/emails/${id}/attachments/0`)).status, 404);
+  const detail = await call(`/emails/${id}`); assert.equal(detail.status, 200); assert.equal((await detail.json()).text, null);
+});
+
 test('invalid schedules and attempts to cancel sent emails are rejected', async () => {
   for (const scheduled_at of ['tomorrow', new Date(Date.now() - 60000).toISOString(), new Date(Date.now() + 31 * 86400000).toISOString()]) assert.equal((await call('/emails', 'POST', { ...message, scheduled_at })).status, 400);
   assert.equal((await call('/emails/missing/cancel', 'POST', {})).status, 404);

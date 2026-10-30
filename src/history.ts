@@ -1,4 +1,4 @@
-import { readSentContent, storeSentContent } from './sent-content';
+import { parseStoredAttachments, readSentContent, storeSentContent } from './sent-content';
 import type { AuthEnv } from './auth';
 import type { OutboundEmail } from './email';
 
@@ -13,6 +13,21 @@ export async function digest(value: string): Promise<string> {
 
 export function serializeRecipients(value: string | string[] | undefined): string {
   return JSON.stringify(value === undefined ? [] : Array.isArray(value) ? value : [value]);
+}
+
+async function readScheduledContent(env: AuthEnv & { INBOUND: R2Bucket }, id: string) {
+  const row = await env.DB.prepare("SELECT payload, payload_r2_key FROM scheduled_emails WHERE id = ? AND state = 'scheduled'").bind(id).first<{ payload: string | null; payload_r2_key: string | null }>();
+  if (!row) return null;
+  const payload = row.payload_r2_key ? await (await env.INBOUND.get(row.payload_r2_key))?.text() : row.payload;
+  if (!payload) throw new Error('Missing scheduled payload');
+  const message: unknown = JSON.parse(payload);
+  if (!message || typeof message !== 'object') throw new Error('Invalid scheduled payload');
+  const value = message as Record<string, unknown>;
+  return { html: typeof value.html === 'string' ? value.html : null, text: typeof value.text === 'string' ? value.text : null, attachments: parseStoredAttachments(value.attachments) ?? [] };
+}
+
+function attachmentMetadata(items: NonNullable<ReturnType<typeof parseStoredAttachments>>) {
+  return items.map((item, index) => ({ id: String(index), filename: item.filename, content_type: item.type, size: item.content.length / 4 * 3 - (item.content.endsWith('==') ? 2 : item.content.endsWith('=') ? 1 : 0) }));
 }
 
 export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idempotencyKey?: string, retainContent = true): Promise<{ id: string }> {
@@ -111,12 +126,12 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
   }
   const attachmentMatch = url.pathname.match(/^\/emails\/([0-9a-f-]{36})\/attachments\/(\d+)$/);
   if (attachmentMatch) {
-    const row = await env.DB.prepare('SELECT body_stored FROM email_history WHERE id = ?').bind(attachmentMatch[1]).first<{ body_stored: number }>();
-    if (!row || !row.body_stored) return Response.json({ message: 'Not found' }, { status: 404 });
+    const row = await env.DB.prepare('SELECT email_history.body_stored, scheduled_emails.state AS schedule_state FROM email_history LEFT JOIN scheduled_emails ON scheduled_emails.id = email_history.id WHERE email_history.id = ?').bind(attachmentMatch[1]).first<{ body_stored: number; schedule_state: string | null }>();
+    if (!row || row.schedule_state === 'canceled') return Response.json({ message: 'Not found' }, { status: 404 });
     try {
-      const stored = await readSentContent(env.INBOUND, attachmentMatch[1]);
-      if (!stored) throw new Error('Missing content');
-      const attachment = stored.attachments?.[Number(attachmentMatch[2])];
+      const stored = row.body_stored ? await readSentContent(env.INBOUND, attachmentMatch[1]) : await readScheduledContent(env, attachmentMatch[1]);
+      if (!stored && row.body_stored) throw new Error('Missing content');
+      const attachment = stored?.attachments?.[Number(attachmentMatch[2])];
       if (!attachment) return Response.json({ message: 'Not found' }, { status: 404 });
       const bytes = Uint8Array.from(atob(attachment.content), char => char.charCodeAt(0));
       const filename = encodeURIComponent(new TextDecoder().decode(new TextEncoder().encode(attachment.filename))).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
@@ -128,24 +143,17 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
   if (!row) return Response.json({ message: 'Not found' }, { status: 404 });
   let html: string | null = null; let text: string | null = null; let attachments: { id: string; filename: string; content_type: string; size: number }[] | null = null;
   if (row.schedule_state === 'scheduled') {
-    const scheduled = await env.DB.prepare("SELECT payload, payload_r2_key FROM scheduled_emails WHERE id = ? AND state = 'scheduled'").bind(id).first<{ payload: string | null; payload_r2_key: string | null }>();
-    if (scheduled) {
-      try {
-        const payload = scheduled.payload_r2_key ? await (await env.INBOUND.get(scheduled.payload_r2_key))?.text() : scheduled.payload;
-        if (!payload) throw new Error('Missing scheduled payload');
-        const message = JSON.parse(payload) as { html?: unknown; text?: unknown };
-        if (!message || typeof message !== 'object') throw new Error('Invalid scheduled payload');
-        html = typeof message.html === 'string' ? message.html : null;
-        text = typeof message.text === 'string' ? message.text : null;
-      } catch { return Response.json({ message: 'Scheduled content is unavailable' }, { status: 503, headers: { 'cache-control': 'no-store' } }); }
-    }
+    try {
+      const scheduled = await readScheduledContent(env, id);
+      if (scheduled) { html = scheduled.html; text = scheduled.text; attachments = attachmentMetadata(scheduled.attachments); }
+    } catch { return Response.json({ message: 'Scheduled content is unavailable' }, { status: 503, headers: { 'cache-control': 'no-store' } }); }
   }
-  if (row.body_stored) {
+  if (row.body_stored && row.schedule_state !== 'canceled') {
     try {
       const content = await readSentContent(env.INBOUND, id);
       if (!content) throw new Error('Missing email content');
       html = content.html; text = content.text;
-      attachments = content.attachments?.map((item, index) => ({ id: String(index), filename: item.filename, content_type: item.type, size: item.content.length / 4 * 3 - (item.content.endsWith('==') ? 2 : item.content.endsWith('=') ? 1 : 0) })) ?? null;
+      attachments = content.attachments ? attachmentMetadata(content.attachments) : null;
     } catch { return Response.json({ message: 'Email content is unavailable' }, { status: 503, headers: { 'cache-control': 'no-store' } }); }
   }
   const events = row.provider_id ? await env.DB.prepare('SELECT recipient, type, occurred_at, details FROM delivery_events WHERE provider_id = ? ORDER BY occurred_at ASC, id ASC LIMIT 101').bind(row.provider_id).all<{ recipient: string; type: string; occurred_at: string; details: string }>() : { results: [] }; 
