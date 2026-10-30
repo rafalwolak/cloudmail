@@ -180,3 +180,12 @@ test('dashboard pages support direct links and keep the account shell', async ()
     assert.match(response.headers.get('content-security-policy'), /script-src 'self'/);
   }
 });
+
+
+test('template editor exposes an isolated preview control', async () => {
+  const response = await fetch(`${base}/dashboard/templates`);
+  const html = await response.text();
+  assert.match(html, /id="preview-template"[^>]+type="button"/);
+  assert.match(html, /id="template-preview-content"/);
+  assert.match(response.headers.get('content-security-policy'), /frame-src 'self'/);
+});

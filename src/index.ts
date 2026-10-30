@@ -132,7 +132,7 @@ export default {
       const path = url.pathname === '/dashboard' || url.pathname.startsWith('/dashboard/') ? '/dashboard.html' : url.pathname;
       const response = await env.ASSETS.fetch(new Request(new URL(path, url), request));
       const headers = new Headers(response.headers);
-      headers.set('content-security-policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+      headers.set('content-security-policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
       headers.set('x-content-type-options', 'nosniff');
       headers.set('referrer-policy', 'no-referrer');
       headers.set('cache-control', 'no-store');
