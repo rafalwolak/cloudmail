@@ -109,6 +109,23 @@ async function loadCloudflareDomains() {
         if (!records.data.length) { const empty = document.createElement('p'); empty.textContent = 'Cloudflare returned no expected records.'; content.append(empty); }
         if (Number(records.result_info?.total_pages) > 1) { const warning = document.createElement('p'); warning.textContent = 'Cloudflare returned only the first page. Check Cloudflare for additional records.'; content.append(warning); }
         for (const record of records.data) { const line = document.createElement('p'); line.textContent = `${record.type} · ${record.name} · ${record.content}${record.priority == null ? '' : ` · priority ${record.priority}`}`; content.append(line); }
+        if (records.data.length) {
+          const check = document.createElement('button'); check.type = 'button'; check.textContent = 'Check public DNS';
+          const result = document.createElement('div'); result.setAttribute('aria-live', 'polite');
+          check.addEventListener('click', async () => {
+            check.disabled = true; result.textContent = 'Checking Cloudflare public DNS…';
+            try {
+              const report = await api(`/api/cloudflare/zones/${encodeURIComponent(zone)}/domains/${encodeURIComponent(domain.tag)}/dns/check`);
+              if (generation !== cloudflareGeneration) return;
+              if (!Array.isArray(report.data)) throw new Error('Unexpected DNS check response.');
+              result.replaceChildren();
+              const note = document.createElement('p'); note.textContent = 'Public DNS results can be cached and do not confirm email delivery.'; result.append(note);
+              for (const record of report.data) { const line = document.createElement('p'); line.textContent = `${record.type} · ${record.name} · ${record.status}`; result.append(line); }
+            } catch (error) { if (generation === cloudflareGeneration) result.textContent = error.message; }
+            finally { check.disabled = false; }
+          });
+          content.append(check, result);
+        }
         details.dataset.loaded = 'true';
       } catch (error) { if (generation === cloudflareGeneration) content.textContent = `${error.message} Close and reopen to retry.`; }
       finally { loadingDns = false; }
