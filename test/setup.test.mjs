@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { authenticationConfigured } from '../src/auth-config.ts';
+import { authenticationConfigured, configuredMailbox } from '../src/auth-config.ts';
 const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:8787';
 
 test('setup status reports configuration without disclosing secrets or addresses', async () => {
@@ -25,4 +25,9 @@ test('authentication rejects example, weak and unsafe configuration', () => {
   assert.equal(authenticationConfigured({ ...valid, BETTER_AUTH_URL: 'http://example.net' }), false);
   assert.equal(authenticationConfigured({ ...valid, BETTER_AUTH_URL: 'https://mail.example.net/path' }), false);
   assert.equal(authenticationConfigured({ ...valid, BETTER_AUTH_URL: 'http://127.0.0.1:8787' }), true);
+});
+
+test('setup only considers plausible mailbox addresses configured', () => {
+  for (const value of ['', ' ', 'not-an-email', 'a@', 'a@example', 'Name <a@example.com>', 'a@example.com\n']) assert.equal(configuredMailbox(value), false);
+  for (const value of ['admin@example.com', 'user+test@sub.example.net']) assert.equal(configuredMailbox(value), true);
 });

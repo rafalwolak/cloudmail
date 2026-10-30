@@ -8,3 +8,7 @@ export function authenticationConfigured(env: Pick<AuthEnv, 'BETTER_AUTH_SECRET'
     return url.origin !== 'https://example.com' && (url.protocol === 'https:' || (local && url.protocol === 'http:')) && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash;
   } catch { return false; }
 }
+
+export function configuredMailbox(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 254 && /^[^\s@<>]+@[^\s@<>.]+(?:\.[^\s@<>.]+)+$/.test(value);
+}

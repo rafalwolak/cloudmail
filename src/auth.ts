@@ -1,3 +1,4 @@
+import { configuredMailbox } from './auth-config';
 import type { OutboundEmail } from './email';
 import { betterAuth } from 'better-auth';
 import { sendRecordedEmail } from './history';
@@ -19,7 +20,7 @@ export function createAuth(env: AuthEnv) {
     baseURL: env.BETTER_AUTH_URL,
     emailAndPassword: {
       enabled: true,
-      disableSignUp: env.ENABLE_SIGNUP !== 'true' || !env.AUTH_EMAIL_FROM,
+      disableSignUp: env.ENABLE_SIGNUP !== 'true' || !configuredMailbox(env.AUTH_EMAIL_FROM),
       requireEmailVerification: true,
       revokeSessionsOnPasswordReset: true,
       sendResetPassword: async ({ user, url }) => {
