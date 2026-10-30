@@ -16,6 +16,11 @@ export default {
   },
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === '/api/setup' && request.method === 'GET') {
+      const authentication = Boolean(env.BETTER_AUTH_SECRET && env.BETTER_AUTH_URL && env.BETTER_AUTH_URL !== 'https://example.com');
+      const sender = Boolean(env.AUTH_EMAIL_FROM);
+      return Response.json({ authentication_configured: authentication, sender_configured: sender, registration_enabled: authentication && sender && env.ENABLE_SIGNUP === 'true', administrator_configured: Boolean(env.ADMIN_EMAIL), sending_domain_status: 'unknown' }, { headers: { 'cache-control': 'no-store' } });
+    }
     if (url.pathname.startsWith('/api/auth/')) {
       if (!env.BETTER_AUTH_SECRET || !env.BETTER_AUTH_URL) return Response.json({ message: 'Authentication is not configured' }, { status: 503 });
       return createAuth(env).handler(request);

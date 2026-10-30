@@ -140,7 +140,22 @@ $('#copy-key').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText($('#key-value').textContent); announce('Key copied.'); }
   catch { announce('Could not copy. Select and copy the key manually.'); }
 });
+async function showSetup() {
+  const setup = await api('/api/setup');
+  const missing = [];
+  if (!setup.authentication_configured) missing.push('Configure the authentication URL and secret.');
+  if (!setup.sender_configured) missing.push('Configure the authentication sender address.');
+  if (!setup.administrator_configured) missing.push('Configure the administrator email address.');
+  if (!setup.registration_enabled) missing.push('Enable registration when your sender is ready.');
+  if (missing.length) {
+    const box = $('#setup-hint');
+    const title = document.createElement('strong'); title.textContent = 'Installation setup'; box.append(title);
+    for (const instruction of missing) { const p = document.createElement('p'); p.textContent = instruction; box.append(p); }
+    box.hidden = false;
+  }
+}
 (async () => {
+  try { await showSetup(); } catch { announce('Could not load installation setup status.'); }
   try { if (resetToken) { showView('reset'); return; } if (resetError) { showView('forgot'); announce('This recovery link is invalid or has expired. Request a new one.'); return; } const session = await api('/api/auth/get-session'); setSignedIn(session); if (session) { await loadKeys(); await loadHistory(true); } }
   catch (error) { announce(error.message); }
 })();
