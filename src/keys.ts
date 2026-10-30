@@ -1,4 +1,5 @@
 import { createAuth, type AuthEnv } from './auth';
+import { authenticationConfigured } from './auth-config';
 
 export interface KeyEnv extends AuthEnv { ADMIN_EMAIL?: string }
 
@@ -16,7 +17,7 @@ export async function keyPermission(db: D1Database, key: string, adminEmail?: st
 }
 
 export async function authorizeAdmin(request: Request, env: KeyEnv): Promise<{ id: string } | Response> {
-  if (!env.BETTER_AUTH_SECRET || !env.BETTER_AUTH_URL) return Response.json({ message: 'Authentication is not configured' }, { status: 503 });
+  if (!authenticationConfigured(env)) return Response.json({ message: 'Authentication is not configured' }, { status: 503 });
   const session = await createAuth(env).api.getSession({ headers: request.headers });
   if (!session) return Response.json({ message: 'Unauthorized' }, { status: 401 });
   if (!env.ADMIN_EMAIL || !session.user.emailVerified || session.user.email.toLowerCase() !== env.ADMIN_EMAIL.toLowerCase()) return Response.json({ message: 'Forbidden' }, { status: 403 });

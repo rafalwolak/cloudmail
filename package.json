@@ -24,5 +24,13 @@
     "typescript": "^7.0.2",
     "wrangler": "^4.156.0"
   },
-  "private": true
+  "private": true,
+  "cloudflare": {
+    "bindings": {
+      "BETTER_AUTH_SECRET": { "description": "Generate a unique random secret with at least 32 bytes of entropy. Never use the example value." },
+      "BETTER_AUTH_URL": { "description": "The exact HTTPS origin of the deployed Worker, such as https://cloudmail.example.workers.dev." },
+      "ADMIN_EMAIL": { "description": "The email address of the installation administrator. Leave empty until ready to register." },
+      "AUTH_EMAIL_FROM": { "description": "A sender address on a domain enabled in Cloudflare Email Service." }
+    }
+  }
 }

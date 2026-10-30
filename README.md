@@ -17,7 +17,7 @@ An early-stage, self-hosted transactional email service on Cloudflare Workers. T
 
 ## Deploy
 
-The Deploy to Cloudflare button provisions a D1 database and uses the `deploy` script to apply migrations before deploying. During setup, configure `BETTER_AUTH_URL` to the exact HTTPS URL of your Worker and provide a unique `BETTER_AUTH_SECRET` with at least 32 bytes of entropy. The example values are placeholders. The button has not yet been verified end to end on a separate account.
+The Deploy to Cloudflare button provisions a D1 database and uses the `deploy` script to apply migrations before deploying. During setup, configure `BETTER_AUTH_URL` to the exact HTTPS origin of your Worker and provide a unique `BETTER_AUTH_SECRET` with at least 32 bytes of entropy. Authentication stays disabled for the example secret, secrets shorter than 32 characters, or an invalid origin. Length does not prove randomness: generate the secret with a cryptographically secure generator. The button has not yet been verified end to end on a separate account.
 
 For a manual deployment, run `npm ci`, create a D1 database with `npx wrangler d1 create cloudmail-auth`, and replace the placeholder `database_id` and `BETTER_AUTH_URL` in `wrangler.jsonc` with values from your account. Set `BETTER_AUTH_SECRET` using `npx wrangler secret put BETTER_AUTH_SECRET`, then run `npm run deploy`. The optional `API_KEY` secret enables the legacy installation-wide API key. Configure a sending domain in Cloudflare Email Service; account and plan restrictions apply.
 
