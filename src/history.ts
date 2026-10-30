@@ -120,7 +120,7 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
       if (!attachment) return Response.json({ message: 'Not found' }, { status: 404 });
       const bytes = Uint8Array.from(atob(attachment.content), char => char.charCodeAt(0));
       const filename = encodeURIComponent(new TextDecoder().decode(new TextEncoder().encode(attachment.filename))).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
-      return new Response(bytes, { headers: { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename*=UTF-8''${filename}`, 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' } });
+      return new Response(bytes, { headers: { 'content-type': 'application/octet-stream', 'content-length': String(bytes.byteLength), 'content-disposition': `attachment; filename*=UTF-8''${filename}`, 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' } });
     } catch { return Response.json({ message: 'Email content is unavailable' }, { status: 503, headers: { 'cache-control': 'no-store' } }); }
   }
   const id = url.pathname.slice('/emails/'.length);

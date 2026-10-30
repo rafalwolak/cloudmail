@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:8787';
 const headers = { authorization: `Bearer ${process.env.TEST_API_KEY || 'local-test-key'}`, 'content-type': 'application/json' };
 
@@ -16,4 +18,12 @@ test('sent attachments are recorded and available only to authorized clients', a
   assert.equal(download.headers.get('content-type'), 'application/octet-stream');
   assert.equal(download.headers.get('content-disposition'), "attachment; filename*=UTF-8''report.txt");
   assert.equal((await fetch(`${base}/emails/${id}/attachments/1`, { headers })).status, 404);
+  const client = new Client({ name: 'sent-attachment-test', version: '1.0.0' });
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers } }));
+    const result = await client.callTool({ name: 'get_sent_attachment', arguments: { id, index: 0 } });
+    assert.notEqual(result.isError, true);
+    assert.deepEqual(JSON.parse(result.content[0].text), { content_base64: 'SGVsbG8=', size: 5 });
+    assert.equal((await client.callTool({ name: 'get_sent_attachment', arguments: { id, index: 1 } })).isError, true);
+  } finally { await client.close(); }
 });

@@ -1,4 +1,5 @@
 import PostalMime from 'postal-mime';
+import { attachmentForAgent } from './agent-attachment.ts';
 
 export interface InboundEnv { DB: D1Database; INBOUND: R2Bucket; INBOUND_ENABLED?: string; INBOUND_ADDRESSES?: string }
 interface InboundRow { id: string; sender: string; recipient: string; subject: string; created_at: string; object_key: string }
@@ -64,13 +65,7 @@ export async function readReceived(request: Request, env: InboundEnv): Promise<R
 }
 
 export async function readReceivedAttachmentForAgent(id: string, index: number, env: InboundEnv) {
-  const result = await readReceived(new Request(`https://cloudmail.invalid/emails/receiving/${id}/attachments/${index}`), env);
-  if (!result.ok) return { isError: true, content: [{ type: 'text' as const, text: JSON.stringify(await result.json()) }] };
-  if (Number(result.headers.get('content-length')) > 1024 * 1024) return { isError: true, content: [{ type: 'text' as const, text: 'Attachment exceeds the 1 MiB MCP size limit; download it through the authenticated API.' }] };
-  const data = new Uint8Array(await result.arrayBuffer());
-  let binary = '';
-  for (let offset = 0; offset < data.length; offset += 8192) binary += String.fromCharCode(...data.subarray(offset, offset + 8192));
-  return { content: [{ type: 'text' as const, text: JSON.stringify({ content_base64: btoa(binary), size: data.length }) }] };
+  return attachmentForAgent(await readReceived(new Request(`https://cloudmail.invalid/emails/receiving/${id}/attachments/${index}`), env));
 }
 
 export async function deleteReceived(id: string, env: InboundEnv): Promise<Response> {
