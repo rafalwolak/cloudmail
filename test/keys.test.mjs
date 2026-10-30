@@ -119,6 +119,9 @@ test('domain-scoped keys enforce the sender for HTTP, templates, batch and MCP',
     const client = new Client({ name: 'domain-test', version: '1.0.0' });
     try {
       await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { authorization: `Bearer ${token}` } } }));
+      assert.notEqual((await client.callTool({ name: 'send_email', arguments: reply })).isError, true);
+      assert.notEqual((await client.callTool({ name: 'send_batch', arguments: { emails: [reply] } })).isError, true);
+      assert.equal((await client.callTool({ name: 'send_email', arguments: { ...reply, headers: { From: 'attacker@other.com' } } })).isError, true);
       assert.equal((await client.callTool({ name: 'send_email', arguments: { ...msg, from: 'hello@other.com' } })).isError, true);
       assert.equal((await client.callTool({ name: 'send_batch', arguments: { emails: [msg, { ...msg, from: 'hello@other.com' }] } })).isError, true);
     } finally { await client.close(); }
