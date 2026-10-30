@@ -1,3 +1,4 @@
+import { discovery } from './discovery';
 import { checkSelectedDomainDns } from './cloudflare-dns-diagnostics';
 import { createAuth, type AuthEnv } from './auth';
 import { authenticationConfigured, authenticationOriginMatches, configuredMailbox } from './auth-config';
@@ -60,6 +61,7 @@ export default {
   },
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === '/mcp/server-card' || url.pathname === '/.well-known/ai-catalog.json') return discovery(request, env.BETTER_AUTH_URL);
     if (url.pathname === '/api/setup' && request.method === 'GET') {
       const authentication = authenticationConfigured(env);
       const sender = configuredMailbox(env.AUTH_EMAIL_FROM);

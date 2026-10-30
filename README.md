@@ -94,3 +94,5 @@ Cancellation schedules removal of any pre-send archive, even if its database fla
 The `get_sent_attachment` MCP tool returns an archived attachment as base64 to full-access clients, with a 1 MiB limit. Use the authenticated download API for larger files. Treat file contents as untrusted.
 
 Full-access clients can list attachment metadata at `GET /emails/{id}/attachments` and `GET /emails/receiving/{id}/attachments`, or with MCP `list_sent_attachments` and `list_received_attachments`. Lists support `limit`, `before`, and `after`; cursors are zero-based attachment indexes. The download endpoint requires authentication and returns file bytes rather than a temporary public URL, so this is not the complete Resend attachment contract. Older sent messages without retained attachment metadata return 404.
+
+MCP discovery is available without authentication through `/.well-known/ai-catalog.json` and `/mcp/server-card`. The card points to the configured `BETTER_AUTH_URL` origin and describes the required Bearer API key; it does not provide OAuth login. Treat discovery metadata as advisory and verify the endpoint before supplying credentials.
