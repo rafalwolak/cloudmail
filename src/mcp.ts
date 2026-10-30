@@ -58,7 +58,7 @@ export async function handleMcp(request: Request, env: AuthEnv): Promise<Respons
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async ({ id }) => historyTool(`/emails/${encodeURIComponent(id)}`));
   const templateFields = z.object({
-    name: z.string(), html: z.string(), text: z.string().optional(), from: z.string().optional(), subject: z.string().optional(), reply_to: z.string().optional(),
+    alias: z.string().nullable().optional(), name: z.string(), html: z.string(), text: z.string().optional(), from: z.string().optional(), subject: z.string().optional(), reply_to: z.string().optional(),
     variables: z.array(z.object({ key: z.string(), type: z.enum(['string', 'number']), fallback_value: z.union([z.string(), z.number()]).optional() }).strict()).optional(),
   }).strict();
   const templateTool = async (path: string, method: string, body?: unknown) => {
@@ -79,24 +79,24 @@ export async function handleMcp(request: Request, env: AuthEnv): Promise<Respons
     return templateTool(`/templates?${params}`, 'GET');
   });
   server.registerTool('get_template', {
-    description: 'Read a template draft and publication state.', inputSchema: z.object({ id: z.string().uuid() }).strict(), annotations: readOnly,
+    description: 'Read a template draft and publication state.', inputSchema: z.object({ id: z.string().regex(/^[a-z0-9_-]{1,64}$/) }).strict(), annotations: readOnly,
   }, async ({ id }) => templateTool(`/templates/${id}`, 'GET'));
   server.registerTool('create_template', {
     description: 'Create an unpublished transactional email template. Declare variables used as triple-braced uppercase placeholders.', inputSchema: templateFields,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async args => templateTool('/templates', 'POST', args));
   server.registerTool('update_template', {
-    description: 'Update a template draft without changing the published snapshot.', inputSchema: z.object({ id: z.string().uuid(), changes: templateFields.partial() }).strict(), annotations: mutating,
+    description: 'Update a template draft without changing the published snapshot.', inputSchema: z.object({ id: z.string().regex(/^[a-z0-9_-]{1,64}$/), changes: templateFields.partial() }).strict(), annotations: mutating,
   }, async ({ id, changes }) => templateTool(`/templates/${id}`, 'PATCH', changes));
   server.registerTool('publish_template', {
-    description: 'Replace the published template snapshot with its current draft. This affects future email sends.', inputSchema: z.object({ id: z.string().uuid() }).strict(), annotations: mutating,
+    description: 'Replace the published template snapshot with its current draft. This affects future email sends.', inputSchema: z.object({ id: z.string().regex(/^[a-z0-9_-]{1,64}$/) }).strict(), annotations: mutating,
   }, async ({ id }) => templateTool(`/templates/${id}/publish`, 'POST'));
   server.registerTool('duplicate_template', {
-    description: 'Create an unpublished copy of a template draft.', inputSchema: z.object({ id: z.string().uuid() }).strict(),
+    description: 'Create an unpublished copy of a template draft.', inputSchema: z.object({ id: z.string().regex(/^[a-z0-9_-]{1,64}$/) }).strict(),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async ({ id }) => templateTool(`/templates/${id}/duplicate`, 'POST'));
   server.registerTool('delete_template', {
-    description: 'Permanently delete a template and its published snapshot.', inputSchema: z.object({ id: z.string().uuid() }).strict(), annotations: mutating,
+    description: 'Permanently delete a template and its published snapshot.', inputSchema: z.object({ id: z.string().regex(/^[a-z0-9_-]{1,64}$/) }).strict(), annotations: mutating,
   }, async ({ id }) => templateTool(`/templates/${id}`, 'DELETE'));
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);

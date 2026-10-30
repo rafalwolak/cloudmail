@@ -81,3 +81,27 @@ test('templates support cursor pagination and duplicate into an unpublished draf
     assert.equal(copy.html, '<p>Hello</p>');
   } finally { for (const id of ids) await call(`/templates/${id}`, 'DELETE'); }
 });
+
+test('published aliases resolve safely and change only after publication', async () => {
+  const suffix = crypto.randomUUID().slice(0, 8);
+  const alias = `welcome-${suffix}`;
+  const nextAlias = `new-${suffix}`;
+  const first = await call('/templates', 'POST', { name: 'Alias one', alias, html: '<p>One</p>', from: 'sender@example.com', subject: 'One' });
+  assert.equal(first.status, 200);
+  const second = await call('/templates', 'POST', { name: 'Alias two', alias, html: '<p>Two</p>' });
+  const ids = [(await first.json()).id, (await second.json()).id];
+  const send = name => call('/emails', 'POST', { to: 'recipient@example.com', template: { id: name } });
+  try {
+    assert.equal((await send(alias)).status, 400);
+    assert.equal((await call(`/templates/${ids[0]}/publish`, 'POST')).status, 200);
+    assert.equal((await send(alias)).status, 200);
+    assert.equal((await call(`/templates/${ids[1]}/publish`, 'POST')).status, 409);
+    assert.equal((await call(`/templates/${ids[0]}`, 'PATCH', { alias: nextAlias })).status, 200);
+    assert.equal((await send(alias)).status, 200);
+    assert.equal((await send(nextAlias)).status, 400);
+    assert.equal((await call(`/templates/${ids[0]}/publish`, 'POST')).status, 200);
+    assert.equal((await send(alias)).status, 400);
+    assert.equal((await send(nextAlias)).status, 200);
+    assert.equal((await call(`/templates/${ids[1]}/publish`, 'POST')).status, 200);
+  } finally { for (const id of ids) await call(`/templates/${id}`, 'DELETE'); }
+});

@@ -105,6 +105,7 @@ function openTemplate(template = null) {
   templateDirty = false;
   templateForm.reset();
   $('#template-name').value = template?.name || '';
+  $('#template-alias').value = template?.alias || '';
   $('#template-from').value = template?.from || '';
   $('#template-subject').value = template?.subject || '';
   $('#template-html').value = template?.html || '';
@@ -160,7 +161,7 @@ templateForm.addEventListener('submit', async event => {
     try { variables = $('#template-variables').value.trim() ? JSON.parse($('#template-variables').value) : []; }
     catch { throw new Error('Variables must be valid JSON.'); }
     if (!Array.isArray(variables)) throw new Error('Variables must be a JSON array.');
-    const body = { name: $('#template-name').value, from: $('#template-from').value, subject: $('#template-subject').value, html: $('#template-html').value, text: $('#template-text').value, variables };
+    const body = { name: $('#template-name').value, alias: $('#template-alias').value.trim() || null, from: $('#template-from').value, subject: $('#template-subject').value, html: $('#template-html').value, text: $('#template-text').value, variables };
     const saved = await api(templateId ? `/api/templates/${encodeURIComponent(templateId)}` : '/api/templates', { method: templateId ? 'PATCH' : 'POST', body: JSON.stringify(body) });
     templateId = saved.id; templateDirty = false; $('#delete-template').hidden = false; updatePublishButton();
     await loadTemplates(); templateStatus.textContent = 'Draft saved. Publish it to use it for sending.';

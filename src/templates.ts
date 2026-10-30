@@ -1,13 +1,14 @@
 import type { AuthEnv } from './auth';
 
 type Variable = { key: string; type: 'string' | 'number'; fallback_value?: string | number };
-type Template = { name: string; html: string; text?: string; from?: string; subject?: string; reply_to?: string; variables?: Variable[] };
+type Template = { alias?: string | null; name: string; html: string; text?: string; from?: string; subject?: string; reply_to?: string; variables?: Variable[] };
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const keyPattern = /^[A-Z][A-Z0-9_]{0,63}$/;
 
 function validateTemplate(value: unknown): value is Template {
-  if (!object(value) || Object.keys(value).some(key => !['name', 'html', 'text', 'from', 'subject', 'reply_to', 'variables'].includes(key))) return false;
+  if (!object(value) || Object.keys(value).some(key => !['name', 'html', 'text', 'from', 'subject', 'reply_to', 'variables', 'alias'].includes(key))) return false;
   if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 100 || typeof value.html !== 'string' || !value.html.trim() || value.html.length > 200000) return false;
+  if (value.alias != null && (typeof value.alias !== 'string' || !/^[a-z][a-z0-9_-]{0,63}$/.test(value.alias) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.alias))) return false;
   for (const key of ['text', 'from', 'subject', 'reply_to']) if (value[key] !== undefined && typeof value[key] !== 'string') return false;
   if (value.variables !== undefined) {
     if (!Array.isArray(value.variables) || value.variables.length > 100) return false;
@@ -33,8 +34,8 @@ const format = (row: TemplateRow) => ({ id: row.id, ...JSON.parse(row.draft), st
 export async function handleTemplates(request: Request, env: AuthEnv): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
-  const match = path.match(/^\/templates\/([0-9a-f-]{36})(?:\/(publish|duplicate))?$/);
-  const id = match?.[1];
+  const match = path.match(/^\/templates\/([a-z0-9_-]{1,64})(?:\/(publish|duplicate))?$/);
+  const reference = match?.[1];
   if (path === '/templates' && request.method === 'GET') {
     const params = url.searchParams;
     if ([...params.keys()].some(key => !['limit', 'before', 'after'].includes(key)) || ['limit', 'before', 'after'].some(key => params.getAll(key).length > 1)) return json({ message: 'Unsupported or duplicate query parameter' }, 400);
@@ -63,18 +64,21 @@ export async function handleTemplates(request: Request, env: AuthEnv): Promise<R
     await env.DB.prepare('INSERT INTO templates (id, draft, created_at, updated_at) VALUES (?, ?, ?, ?)').bind(newId, JSON.stringify(body), now, now).run();
     return json({ id: newId });
   }
-  if (!id) return json({ message: 'Not found' }, 404);
-  const row = await env.DB.prepare('SELECT * FROM templates WHERE id = ?').bind(id).first<TemplateRow>();
+  if (!reference) return json({ message: 'Not found' }, 404);
+  const row = await env.DB.prepare("SELECT * FROM templates WHERE id = ? OR json_extract(published, '$.alias') = ?").bind(reference, reference).first<TemplateRow>();
   if (!row) return json({ message: 'Not found' }, 404);
+  const id = row.id;
   if (match?.[2] === 'duplicate' && request.method === 'POST') {
     const draft: Template = JSON.parse(row.draft);
-    const copy = { ...draft, name: `${draft.name.slice(0, 93)} (copy)` };
+    const { alias: _alias, ...rest } = draft;
+    const copy = { ...rest, name: `${draft.name.slice(0, 93)} (copy)` };
     const newId = crypto.randomUUID(); const now = new Date().toISOString();
     await env.DB.prepare('INSERT INTO templates (id, draft, created_at, updated_at) VALUES (?, ?, ?, ?)').bind(newId, JSON.stringify(copy), now, now).run();
     return json({ object: 'template', id: newId });
   }
   if (match?.[2] === 'publish' && request.method === 'POST') {
-    await env.DB.prepare('UPDATE templates SET published = draft, updated_at = ? WHERE id = ?').bind(new Date().toISOString(), id).run();
+    const result = await env.DB.prepare("UPDATE templates SET published = draft, updated_at = ? WHERE id = ? AND NOT EXISTS (SELECT 1 FROM templates other WHERE other.id != ? AND json_extract(other.published, '$.alias') = json_extract((SELECT draft FROM templates WHERE id = ?), '$.alias'))").bind(new Date().toISOString(), id, id, id).run();
+    if (!result.meta.changes) return json({ message: 'Template alias is already published' }, 409);
     return json({ id });
   }
   if (match?.[2]) return json({ message: 'Not found' }, 404);
@@ -96,7 +100,7 @@ export async function resolveTemplate(value: unknown, env: AuthEnv): Promise<unk
   if (!object(value) || !Object.hasOwn(value, 'template')) return value;
   const ref = value.template;
   if (!object(ref) || Object.keys(ref).some(key => !['id', 'variables'].includes(key)) || typeof ref.id !== 'string' || (ref.variables !== undefined && !object(ref.variables)) || value.html !== undefined || value.text !== undefined) return 'Invalid template reference';
-  const row = await env.DB.prepare('SELECT published FROM templates WHERE id = ?').bind(ref.id).first<{ published: string | null }>();
+  const row = await env.DB.prepare("SELECT published FROM templates WHERE id = ? OR json_extract(published, '$.alias') = ?").bind(ref.id, ref.id).first<{ published: string | null }>();
   if (!row?.published) return 'Template not found or not published';
   const template: Template = JSON.parse(row.published);
   const input = (ref.variables ?? {}) as Record<string, unknown>;
