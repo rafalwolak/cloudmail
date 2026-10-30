@@ -19,6 +19,10 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     const tools = await client.listTools();
     assert.ok(tools.tools.some(tool => tool.name === 'send_email'));
     assert.ok(tools.tools.some(tool => tool.name === 'send_batch'));
+    assert.ok(tools.tools.some(tool => tool.name === 'list_received_emails'));
+    assert.ok(tools.tools.some(tool => tool.name === 'get_received_email'));
+    const inbox = await client.callTool({ name: 'list_received_emails', arguments: { limit: 1 } });
+    assert.notEqual(inbox.isError, true);
     assert.ok(tools.tools.some(tool => tool.name === 'list_emails'));
     assert.ok(tools.tools.some(tool => tool.name === 'get_email'));
     assert.ok(tools.tools.some(tool => tool.name === 'list_delivery_events'));

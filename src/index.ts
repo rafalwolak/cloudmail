@@ -1,6 +1,7 @@
 import { createAuth, type AuthEnv } from './auth';
 import { allowedSender, parseEmail } from './email';
 import { handleMcp } from './mcp';
+import { receiveEmail, readReceived, type InboundEnv } from './inbound';
 import { sendBatch } from './batch';
 import { manageSchedule, processScheduled, scheduleEmail, validateSchedule } from './scheduled';
 import { handleTemplates, resolveTemplate } from './templates';
@@ -8,11 +9,12 @@ import { processDeliveryBatch } from './delivery-events';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
 import { authorizeAdmin, findKeyOwner, handleKeyResources, keyPermission, manageKeys, type KeyEnv } from './keys';
 
-interface Env extends AuthEnv, KeyEnv { API_KEY: string; ASSETS: Fetcher; DELIVERY_QUEUE_NAME?: string }
+interface Env extends AuthEnv, KeyEnv, InboundEnv { API_KEY: string; ASSETS: Fetcher; DELIVERY_QUEUE_NAME?: string }
 
 const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cloudmail - transactional email on Cloudflare</title><style>body{margin:0;background:#101613;color:#f2f4ec;font:16px system-ui}main{max-width:1000px;margin:auto;padding:36px 24px}nav{display:flex;justify-content:space-between;align-items:center}a{color:#c0efa0}header{padding:110px 0 80px}h1{font-size:clamp(48px,8vw,100px);line-height:.98;letter-spacing:-.06em;max-width:800px;margin:22px 0}p{line-height:1.7;color:#b9c5b8;max-width:620px}.tag{color:#b9ec94;font-size:13px;letter-spacing:.12em;text-transform:uppercase}section{border-top:1px solid #39443c;padding:35px 0}code{color:#b9ec94}footer{padding:60px 0;color:#9aab9c}</style></head><body><main><nav><strong>✳ CLOUDMAIL</strong><a href="/dashboard">Dashboard ↗</a></nav><header><span class="tag">Open source · Cloudflare native</span><h1>Email, on your own terms.</h1><p>A self-hosted foundation for transactional email. Built for developers who want a simple API and infrastructure they control.</p></header><section><span class="tag">Early development</span><h2>Built in the open.</h2><p>Cloudmail is under active development. Email sending requires a verified Cloudflare sending domain and an API key. Sign in to manage your API keys in the dashboard.</p><p>API endpoint: <code>POST /emails</code></p></section><footer>Cloudmail · Transactional email only</footer></main></body></html>`;
 
 export default {
+  async email(message: ForwardableEmailMessage, env: Env): Promise<void> { await receiveEmail(message, env); },
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await processScheduled(env); },
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
     if (!env.DELIVERY_QUEUE_NAME || batch.queue !== env.DELIVERY_QUEUE_NAME) { batch.retryAll(); return; }
@@ -69,6 +71,7 @@ export default {
     }
     if (url.pathname === '/templates' || url.pathname.startsWith('/templates/')) return handleTemplates(request, env);
     if (url.pathname === '/emails/batch' && request.method === 'POST') return sendBatch(request, env, access.sending_domain);
+    if (request.method === 'GET' && (url.pathname === '/emails/receiving' || url.pathname.startsWith('/emails/receiving/'))) return readReceived(request, env);
     if (request.method === 'GET') return readHistory(request, env);
     if (url.pathname.startsWith('/emails/')) return manageSchedule(request, env);
     let data: unknown;
