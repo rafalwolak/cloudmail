@@ -72,6 +72,11 @@ async function loadHistory(reset = false) {
           for (const event of result.delivery_events) {
             const row = document.createElement('li');
             row.textContent = `${event.recipient} · ${event.type} · ${new Date(event.occurred_at).toLocaleString()}`;
+            if (event.details && Object.keys(event.details).length) {
+              const diagnostics = document.createElement('span');
+              diagnostics.textContent = Object.entries(event.details).map(([key, value]) => `${key.replaceAll('_', ' ')}: ${value}`).join(' · ');
+              row.append(diagnostics);
+            }
             events.append(row);
           }
           content.append(events);

@@ -77,6 +77,6 @@ export async function readHistory(request: Request, env: AuthEnv): Promise<Respo
   const id = url.pathname.slice('/emails/'.length);
   const row = await env.DB.prepare(`SELECT ${fields}, provider_id FROM ${tables} WHERE email_history.id = ?`).bind(id).first<HistoryRow & { provider_id: string | null }>();
   if (!row) return Response.json({ message: 'Not found' }, { status: 404 });
-  const events = row.provider_id ? await env.DB.prepare('SELECT recipient, type, occurred_at FROM delivery_events WHERE provider_id = ? ORDER BY occurred_at ASC, id ASC LIMIT 101').bind(row.provider_id).all() : { results: [] };
-  return Response.json({ ...format(row), delivery_events: events.results.slice(0, 100), delivery_events_has_more: events.results.length > 100 }, { headers: { 'cache-control': 'no-store' } });
+  const events = row.provider_id ? await env.DB.prepare('SELECT recipient, type, occurred_at, details FROM delivery_events WHERE provider_id = ? ORDER BY occurred_at ASC, id ASC LIMIT 101').bind(row.provider_id).all<{ recipient: string; type: string; occurred_at: string; details: string }>() : { results: [] }; 
+  return Response.json({ ...format(row), delivery_events: events.results.slice(0, 100).map(event => ({ ...event, details: JSON.parse(event.details) })), delivery_events_has_more: events.results.length > 100 }, { headers: { 'cache-control': 'no-store' } });
 }
