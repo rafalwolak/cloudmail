@@ -2,12 +2,11 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
 import { allowedSender, parseEmail } from './email';
-import type { KeyAccess } from './keys';
+import { findKeyOwner, handleKeyResources, type KeyAccess, type KeyEnv } from './keys';
 import { sendBatch } from './batch';
 import { handleTemplates, resolveTemplate } from './templates';
 import { manageSchedule, scheduleEmail, validateSchedule } from './scheduled';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
-import type { AuthEnv } from './auth';
 
 const addresses = z.union([z.string(), z.array(z.string())]);
 
@@ -20,7 +19,7 @@ const emailSchema = z.object({
       attachments: z.array(z.object({ filename: z.string(), content: z.string(), content_type: z.string().optional(), content_id: z.string().optional() }).strict()).optional(),
     }).strict();
 
-export async function handleMcp(request: Request, env: AuthEnv, access: KeyAccess): Promise<Response> {
+export async function handleMcp(request: Request, env: KeyEnv, access: KeyAccess): Promise<Response> {
   const origin = request.headers.get('origin');
   if (origin && origin !== new URL(env.BETTER_AUTH_URL).origin) return Response.json({ message: 'Invalid origin' }, { status: 403 });
   const server = new McpServer({ name: 'cloudmail', version: '0.1.0' });
@@ -56,6 +55,16 @@ export async function handleMcp(request: Request, env: AuthEnv, access: KeyAcces
     return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(await response.json()) }] };
   });
   if (access.permission === 'full_access') {
+  const keyTool = async (path: string, method: string, body?: unknown) => {
+    const owner = await findKeyOwner(env);
+    if (!owner) return { isError: true, content: [{ type: 'text' as const, text: 'Verified administrator is not configured' }] };
+    const response = await handleKeyResources(new Request(new URL(path, env.BETTER_AUTH_URL), { method, ...(body !== undefined && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) }), env, owner.id);
+    const result = response.status === 204 ? { deleted: true } : await response.json();
+    return { ...(response.ok ? {} : { isError: true }), content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
+  };
+  server.registerTool('list_api_keys', { description: 'List API key metadata. Tokens are never returned.', inputSchema: z.object({}).strict(), annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }, async () => keyTool('/api-keys', 'GET'));
+  server.registerTool('create_api_key', { description: 'Create an API key. Its secret is returned once; store it securely and never expose it in messages or logs.', inputSchema: z.object({ name: z.string(), permission: z.enum(['full_access', 'sending_access']).optional(), sending_domain: z.string().nullable().optional() }).strict(), annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false } }, async args => keyTool('/api-keys', 'POST', args));
+  server.registerTool('delete_api_key', { description: 'Permanently revoke an API key. Applications using it will stop working.', inputSchema: z.object({ id: z.string().uuid() }).strict(), annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false } }, async ({ id }) => keyTool(`/api-keys/${id}`, 'DELETE'));
   const historyTool = async (path: string) => {
     const response = await readHistory(new Request(new URL(path, env.BETTER_AUTH_URL)), env);
     const body = await response.json();

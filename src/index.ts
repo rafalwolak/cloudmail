@@ -6,7 +6,7 @@ import { manageSchedule, processScheduled, scheduleEmail, validateSchedule } fro
 import { handleTemplates, resolveTemplate } from './templates';
 import { processDeliveryBatch } from './delivery-events';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
-import { authorizeAdmin, keyPermission, manageKeys, type KeyEnv } from './keys';
+import { authorizeAdmin, findKeyOwner, handleKeyResources, keyPermission, manageKeys, type KeyEnv } from './keys';
 
 interface Env extends AuthEnv, KeyEnv { API_KEY: string; ASSETS: Fetcher; DELIVERY_QUEUE_NAME?: string }
 
@@ -55,13 +55,18 @@ export default {
       return new Response(response.body, { status: response.status, headers });
     }
     if (url.pathname === '/' && request.method === 'GET') return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'", 'x-content-type-options': 'nosniff' } });
-    if (url.pathname !== '/mcp' && !(url.pathname === '/templates' || url.pathname.startsWith('/templates/')) && !(url.pathname === '/emails/batch' && request.method === 'POST') && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && ['GET', 'PATCH', 'POST'].includes(request.method))) return Response.json({ message: 'Not found' }, { status: 404 });
+    if (url.pathname !== '/mcp' && !(url.pathname === '/api-keys' || url.pathname.startsWith('/api-keys/')) && !(url.pathname === '/templates' || url.pathname.startsWith('/templates/')) && !(url.pathname === '/emails/batch' && request.method === 'POST') && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && ['GET', 'PATCH', 'POST'].includes(request.method))) return Response.json({ message: 'Not found' }, { status: 404 });
     const authorization = request.headers.get('Authorization') || '';
     const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
     const access = env.API_KEY && token === env.API_KEY ? { permission: 'full_access' as const, sending_domain: null } : await keyPermission(env.DB, token, env.ADMIN_EMAIL);
     if (!access) return Response.json({ message: 'Unauthorized' }, { status: 401 });
     if (access.permission === 'sending_access' && url.pathname !== '/mcp' && !(request.method === 'POST' && (url.pathname === '/emails' || url.pathname === '/emails/batch'))) return Response.json({ message: 'Forbidden' }, { status: 403 });
     if (url.pathname === '/mcp') return handleMcp(request, env, access);
+    if (url.pathname === '/api-keys' || url.pathname.startsWith('/api-keys/')) {
+      const owner = await findKeyOwner(env);
+      if (!owner) return Response.json({ message: 'Verified administrator is not configured' }, { status: 503 });
+      return handleKeyResources(request, env, owner.id);
+    }
     if (url.pathname === '/templates' || url.pathname.startsWith('/templates/')) return handleTemplates(request, env);
     if (url.pathname === '/emails/batch' && request.method === 'POST') return sendBatch(request, env, access.sending_domain);
     if (request.method === 'GET') return readHistory(request, env);
