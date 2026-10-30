@@ -1,0 +1,1 @@
+ALTER TABLE email_history ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';

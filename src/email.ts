@@ -10,11 +10,12 @@ export interface OutboundEmail {
   replyTo?: string;
   headers?: Record<string, string>;
   attachments?: Attachment[];
+  tags?: { name: string; value: string }[];
 }
 
 interface Attachment { filename: string; content: string; type: string; disposition: 'attachment' | 'inline'; contentId?: string }
 
-const allowedFields = new Set(['from', 'to', 'subject', 'text', 'html', 'cc', 'bcc', 'reply_to', 'headers', 'attachments']);
+const allowedFields = new Set(['from', 'to', 'subject', 'text', 'html', 'cc', 'bcc', 'reply_to', 'headers', 'attachments', 'tags']);
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 const addresses = (value: unknown): value is Addresses => nonempty(value) || (Array.isArray(value) && value.length > 0 && value.every(nonempty));
 
@@ -50,6 +51,7 @@ export function parseEmail(value: unknown): OutboundEmail | string {
   if (email.bcc !== undefined && !addresses(email.bcc)) return 'Invalid bcc';
   if (email.reply_to !== undefined && !nonempty(email.reply_to)) return 'reply_to must be a single address';
   if (email.headers !== undefined && (!email.headers || typeof email.headers !== 'object' || Array.isArray(email.headers) || !Object.values(email.headers).every(value => typeof value === 'string'))) return 'headers must contain string values';
+  if (email.tags !== undefined && (!Array.isArray(email.tags) || email.tags.length > 100 || !email.tags.every(tag => tag && typeof tag === 'object' && !Array.isArray(tag) && Object.keys(tag).length === 2 && typeof tag.name === 'string' && /^[A-Za-z0-9_-]{1,256}$/.test(tag.name) && typeof tag.value === 'string' && /^[A-Za-z0-9_-]{1,256}$/.test(tag.value)))) return 'Invalid tags';
   const attachments = email.attachments === undefined ? undefined : parseAttachments(email.attachments);
   if (attachments === null) return 'Invalid attachments: use up to 32 base64-encoded files';
   const count = (v: unknown) => Array.isArray(v) ? v.length : v === undefined ? 0 : 1;
@@ -63,5 +65,6 @@ export function parseEmail(value: unknown): OutboundEmail | string {
     ...(nonempty(email.reply_to) && { replyTo: email.reply_to }),
     ...(email.headers !== undefined && { headers: email.headers as Record<string, string> }),
     ...(attachments !== undefined && { attachments }),
+    ...(Array.isArray(email.tags) && { tags: email.tags }),
   };
 }

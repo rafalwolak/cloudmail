@@ -19,8 +19,8 @@ export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idem
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     await env.DB.prepare('UPDATE email_history SET idempotency_key_hash = NULL WHERE idempotency_key_hash = ? AND created_at < ?').bind(keyHash, cutoff).run();
   }
-  const insert = await env.DB.prepare('INSERT INTO email_history (id, sender, recipients, subject, status, created_at, idempotency_key_hash, request_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(idempotency_key_hash) DO NOTHING')
-    .bind(id, email.from, JSON.stringify(to), email.subject, 'pending', new Date().toISOString(), keyHash, requestHash).run();
+  const insert = await env.DB.prepare('INSERT INTO email_history (id, sender, recipients, subject, status, created_at, idempotency_key_hash, request_hash, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(idempotency_key_hash) DO NOTHING')
+    .bind(id, email.from, JSON.stringify(to), email.subject, 'pending', new Date().toISOString(), keyHash, requestHash, JSON.stringify(email.tags ?? [])).run();
   if (!insert.meta.changes) {
     const existing = await env.DB.prepare('SELECT id, request_hash, status FROM email_history WHERE idempotency_key_hash = ?').bind(keyHash).first<{ id: string; request_hash: string; status: string }>();
     if (!existing || existing.request_hash !== requestHash) throw new IdempotencyConflict('invalid_idempotent_request');
@@ -29,7 +29,8 @@ export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idem
   }
   let result: { messageId: string };
   try {
-    result = await env.EMAIL.send(email);
+    const { tags: _tags, ...message } = email;
+    result = await env.EMAIL.send(message);
   } catch (error) {
     try { await env.DB.prepare("UPDATE email_history SET status = 'unknown' WHERE id = ?").bind(id).run(); }
     catch { console.error('Could not update email history after send error'); }
@@ -40,14 +41,14 @@ export async function sendRecordedEmail(env: AuthEnv, email: OutboundEmail, idem
   return { id };
 }
 
-interface HistoryRow { id: string; sender: string; recipients: string; subject: string; status: string; created_at: string }
+interface HistoryRow { id: string; sender: string; recipients: string; subject: string; status: string; created_at: string; tags: string }
 function format(row: HistoryRow) {
-  return { id: row.id, from: row.sender, to: JSON.parse(row.recipients), subject: row.subject, status: row.status, created_at: row.created_at };
+  return { id: row.id, from: row.sender, to: JSON.parse(row.recipients), subject: row.subject, status: row.status, created_at: row.created_at, tags: JSON.parse(row.tags) };
 }
 
 export async function readHistory(request: Request, env: AuthEnv): Promise<Response> {
   const url = new URL(request.url);
-  const fields = 'id, sender, recipients, subject, status, created_at';
+  const fields = 'id, sender, recipients, subject, status, created_at, tags';
   if (url.pathname === '/emails') {
     const params = url.searchParams;
     if ([...params.keys()].some(key => !['limit', 'before', 'after'].includes(key)) || ['limit', 'before', 'after'].some(key => params.getAll(key).length > 1)) return Response.json({ message: 'Unsupported or duplicate query parameter' }, { status: 400 });

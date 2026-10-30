@@ -20,7 +20,7 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     assert.ok(tools.tools.some(tool => tool.name === 'send_email'));
     assert.ok(tools.tools.some(tool => tool.name === 'list_emails'));
     assert.ok(tools.tools.some(tool => tool.name === 'get_email'));
-    const result = await client.callTool({ name: 'send_email', arguments: { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Test', text: 'Hello' } });
+    const result = await client.callTool({ name: 'send_email', arguments: { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Test', text: 'Hello', tags: [{ name: 'source', value: 'mcp' }] } });
     assert.notEqual(result.isError, true);
     const id = JSON.parse(result.content[0].text).id;
     assert.ok(id);
@@ -28,6 +28,7 @@ test('MCP client discovers and calls the transactional send tool', async () => {
     assert.equal((await history.json()).status, 'accepted');
     const retrieved = await client.callTool({ name: 'get_email', arguments: { id } });
     assert.equal(JSON.parse(retrieved.content[0].text).id, id);
+    assert.deepEqual(JSON.parse(retrieved.content[0].text).tags, [{ name: 'source', value: 'mcp' }]);
     const listed = await client.callTool({ name: 'list_emails', arguments: { limit: 10 } });
     assert.ok(JSON.parse(listed.content[0].text).data.some(item => item.id === id));
     const idemArgs = { from: 'sender@example.com', to: 'recipient@example.com', subject: 'MCP idempotency', text: 'Hello', idempotency_key: crypto.randomUUID() };

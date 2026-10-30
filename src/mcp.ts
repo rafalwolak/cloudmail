@@ -18,6 +18,7 @@ export async function handleMcp(request: Request, env: AuthEnv): Promise<Respons
       from: z.string().optional(), to: addresses, subject: z.string().optional(), text: z.string().optional(), html: z.string().optional(),
       cc: addresses.optional(), bcc: addresses.optional(), reply_to: z.string().optional(), headers: z.record(z.string(), z.string()).optional(),
       idempotency_key: z.string().min(1).max(256).optional(),
+      tags: z.array(z.object({ name: z.string(), value: z.string() }).strict()).max(100).optional(),
       template: z.object({ id: z.string(), variables: z.record(z.string(), z.union([z.string(), z.number()])).optional() }).strict().optional(),
       attachments: z.array(z.object({ filename: z.string(), content: z.string(), content_type: z.string().optional(), content_id: z.string().optional() }).strict()).optional(),
     }).strict(),

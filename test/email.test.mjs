@@ -42,3 +42,19 @@ test('accepts base64 attachments through the email API', async () => {
   assert.equal(response.status, 200, await response.clone().text());
   assert.ok((await response.json()).id);
 });
+
+test('stores valid tags on sent emails and rejects invalid tags', async () => {
+  const tags = [{ name: 'category', value: 'password_reset' }, { name: 'customer', value: '123-ABC' }];
+  const response = await send({ ...message, tags });
+  assert.equal(response.status, 200, await response.clone().text());
+  const { id } = await response.json();
+  const history = await fetch(`${base}/emails/${id}`, { headers: { authorization: `Bearer ${key}` } });
+  assert.deepEqual((await history.json()).tags, tags);
+  const batch = await fetch(`${base}/emails/batch`, { method: 'POST', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: JSON.stringify([{ ...message, tags }]) });
+  assert.equal(batch.status, 200);
+  const batchId = (await batch.json()).data[0].id;
+  assert.deepEqual((await (await fetch(`${base}/emails/${batchId}`, { headers: { authorization: `Bearer ${key}` } })).json()).tags, tags);
+  for (const invalid of [[{ name: 'bad space', value: 'ok' }], [{ name: 'ok', value: '' }], [{ name: 'ok', value: 'ok', extra: true }], 'invalid']) {
+    assert.equal((await send({ ...message, tags: invalid })).status, 400);
+  }
+});
