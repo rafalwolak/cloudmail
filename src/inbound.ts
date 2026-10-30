@@ -10,13 +10,10 @@ export async function receiveEmail(message: ForwardableEmailMessage, env: Inboun
   if (message.rawSize > 25 * 1024 * 1024) { message.setReject('Message exceeds size limit'); return; }
   const id = crypto.randomUUID(); const objectKey = `inbound/${id}`;
   await env.INBOUND.put(objectKey, message.raw);
-  try {
-    await env.DB.prepare('INSERT INTO inbound_emails (id, sender, recipient, subject, created_at, object_key) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind(id, message.from, message.to, (message.headers.get('subject') ?? '').slice(0, 998), new Date().toISOString(), objectKey).run();
-  } catch (error) {
-    try { await env.INBOUND.delete(objectKey); } catch { console.error('Could not remove inbound MIME object after database failure'); }
-    throw error;
-  }
+  // A failed D1 response can follow a successful commit. Keep the object so a
+  // committed metadata row never points to content deleted on an uncertain result.
+  await env.DB.prepare('INSERT INTO inbound_emails (id, sender, recipient, subject, created_at, object_key) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(id, message.from, message.to, (message.headers.get('subject') ?? '').slice(0, 998), new Date().toISOString(), objectKey).run();
 }
 
 export async function readReceived(request: Request, env: InboundEnv): Promise<Response> {

@@ -24,12 +24,20 @@ test('rejects disabled, unconfigured and oversized inbound messages', async () =
     assert.ok(context.message.rejected); assert.equal(context.rows.size, 0); assert.equal(context.objects.size, 0);
   }
 });
-test('removes uploaded MIME object if metadata cannot be committed', async () => {
+test('preserves uploaded MIME object when a D1 response is uncertain', async () => {
   const context = fixture(); context.env.DB.prepare = () => ({ bind: () => ({ run: async () => { throw new Error('D1 unavailable'); } }) });
   await assert.rejects(() => receiveEmail(context.message, context.env));
-  assert.equal(context.objects.size, 0);
+  assert.equal(context.objects.size, 1);
 });
 
+
+test('retains content when D1 committed before reporting a failure', async () => {
+  const context = fixture(); const prepare = context.env.DB.prepare;
+  context.env.DB.prepare = sql => ({ bind: (...args) => ({ async run() { await prepare(sql).bind(...args).run(); throw new Error('response lost'); } }) });
+  await assert.rejects(() => receiveEmail(context.message, context.env));
+  assert.equal(context.rows.size, 1);
+  assert.ok(context.objects.has([...context.rows.values()][0].object_key));
+});
 
 test('returns attachments as downloads with safe response headers', async () => {
   const context = fixture();
