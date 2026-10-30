@@ -4,7 +4,7 @@ import { receiveEmail, readReceived, readReceivedAttachmentForAgent, deleteRecei
 const raw = 'From: sender@example.com\r\nTo: inbox@example.com\r\nSubject: Hello\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello inbox';
 function fixture() {
   const objects = new Map(); const rows = new Map();
-  const env = { INBOUND_ENABLED: 'true', INBOUND_ADDRESSES: 'inbox@example.com', INBOUND: { async put(key, stream) { objects.set(key, await new Response(stream).arrayBuffer()); }, async get(key) { const value = objects.get(key); return value ? { arrayBuffer: async () => value } : null; }, async delete(key) { objects.delete(key); } }, DB: { prepare(sql) { return { bind(...args) { return { async run() { if (sql.startsWith('DELETE')) { rows.delete(args[0]); return { meta: { changes: 1 } }; } rows.set(args[0], { id: args[0], sender: args[1], recipient: args[2], subject: args[3], created_at: args[4], object_key: args[5] }); }, async first() { return rows.get(args[0]) || null; } }; } }; } } };
+  const env = { INBOUND_ENABLED: 'true', INBOUND_ADDRESSES: 'inbox@example.com', INBOUND: { async put(key, stream) { objects.set(key, await new Response(stream).arrayBuffer()); }, async get(key) { const value = objects.get(key); return value ? { arrayBuffer: async () => value } : null; }, async delete(key) { objects.delete(key); } }, DB: { prepare(sql) { return { bind(...args) { return { async run() { if (sql.startsWith('DELETE')) { rows.delete(args[0]); return { meta: { changes: 1 } }; } rows.set(args[0], { id: args[0], sender: args[1], recipient: args[2], subject: args[3], created_at: args[4], object_key: args[5], message_id: args[6] }); }, async first() { return rows.get(args[0]) || null; } }; } }; } } };
   const message = { from: 'sender@example.com', to: 'inbox@example.com', headers: new Headers({ subject: 'Hello' }), rawSize: new TextEncoder().encode(raw).length, raw: new Blob([raw]).stream(), setReject(reason) { this.rejected = reason; } };
   return { env, message, rows, objects };
 }
@@ -17,6 +17,11 @@ test('accepts configured recipients and returns parsed untrusted content', async
   assert.equal(response.status, 200); const data = await response.json();
   assert.equal(data.subject, 'Hello'); assert.equal(data.text, 'Hello inbox\n');
   assert.equal(response.headers.get('cache-control'), 'no-store');
+});
+test('stores a bounded message ID header for webhook metadata', async () => {
+  const context = fixture(); context.message.headers.set('message-id', '<thread@example.com>');
+  await receiveEmail(context.message, context.env);
+  assert.equal([...context.rows.values()][0].message_id, '<thread@example.com>');
 });
 test('rejects disabled, unconfigured and oversized inbound messages', async () => {
   for (const change of [({ env }) => { env.INBOUND_ENABLED = 'false'; }, ({ message }) => { message.to = 'unknown@example.com'; }, ({ message }) => { message.rawSize = 26 * 1024 * 1024; }]) {

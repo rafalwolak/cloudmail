@@ -12,8 +12,8 @@ export async function receiveEmail(message: ForwardableEmailMessage, env: Inboun
   await env.INBOUND.put(objectKey, message.raw);
   // A failed D1 response can follow a successful commit. Keep the object so a
   // committed metadata row never points to content deleted on an uncertain result.
-  await env.DB.prepare('INSERT INTO inbound_emails (id, sender, recipient, subject, created_at, object_key) VALUES (?, ?, ?, ?, ?, ?)')
-    .bind(id, message.from, message.to, (message.headers.get('subject') ?? '').slice(0, 998), new Date().toISOString(), objectKey).run();
+  await env.DB.prepare('INSERT INTO inbound_emails (id, sender, recipient, subject, created_at, object_key, message_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, message.from, message.to, (message.headers.get('subject') ?? '').slice(0, 998), new Date().toISOString(), objectKey, message.headers.get('message-id')?.slice(0, 998) ?? null).run();
 }
 
 export async function readReceived(request: Request, env: InboundEnv): Promise<Response> {

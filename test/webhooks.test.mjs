@@ -61,7 +61,7 @@ test('lifecycle webhooks carry correct metadata without message bodies', async (
         if (sql.includes('RETURNING payload')) return { payload: args[0] };
         if (sql.includes('JOIN webhooks')) return { id: 'delivery1', attempts: 1, endpoint: 'https://hooks.example.com/event', signing_secret: secret, event_id: `${kind}:email1`, type: kind, recipient: 'first@example.com', occurred_at: '2026-10-30T10:00:00.000Z', details: '{}', provider_id: 'provider1' };
         if (sql.includes('FROM email_history')) return { id: 'email1', sender: 'sender@example.com', subject: 'Sent', tags: '[]', recipients: '["first@example.com","second@example.com"]' };
-        if (sql.includes('FROM inbound_emails')) return { id: 'email1', sender: 'sender@example.com', recipient: 'first@example.com', subject: 'Received' };
+        if (sql.includes('FROM inbound_emails')) return { id: 'email1', sender: 'sender@example.com', recipient: 'first@example.com', subject: 'Received', message_id: '<thread@example.com>' };
         throw new Error(`Unexpected SQL: ${sql}`);
       }, async run() {},
     }; } }; }, async batch(statements) { for (const statement of statements) await statement.run(); } } };
@@ -71,6 +71,7 @@ test('lifecycle webhooks carry correct metadata without message bodies', async (
     assert.equal(posts[0].type, `email.${kind}`); assert.equal(posts[0].data.email_id, 'email1');
     assert.deepEqual(posts[0].data.to, kind === 'sent' ? ['first@example.com', 'second@example.com'] : ['first@example.com']);
     assert.equal(posts[0].data.subject, kind === 'sent' ? 'Sent' : 'Received');
+    if (kind === 'received') assert.equal(posts[0].data.message_id, '<thread@example.com>');
     assert.ok(!('html' in posts[0].data) && !('text' in posts[0].data));
   }
 });

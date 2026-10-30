@@ -2,6 +2,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readReceived } from '../src/inbound.ts';
+import { readFile } from 'node:fs/promises';
+
+test('message ID migration preserves existing inbound rows', async () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec('CREATE TABLE inbound_emails (id TEXT PRIMARY KEY); INSERT INTO inbound_emails VALUES (\'existing\')');
+    db.exec(await readFile(new URL('../migrations/0032_inbound_message_id.sql', import.meta.url), 'utf8'));
+    assert.equal(db.prepare('SELECT message_id FROM inbound_emails WHERE id = ?').get('existing').message_id, null);
+  } finally { db.close(); }
+});
 
 test('filters received messages literally and paginates the filtered result', async () => {
   const db = new DatabaseSync(':memory:');
