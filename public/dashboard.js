@@ -55,7 +55,33 @@ async function loadHistory(reset = false) {
     const item = document.createElement('li');
     const subject = document.createElement('strong'); subject.textContent = email.subject;
     const detail = document.createElement('span'); detail.textContent = `${email.to.join(', ')} · ${email.status} · ${new Date(email.created_at).toLocaleString()}`;
-    item.append(subject, detail); list.append(item);
+    const details = document.createElement('details');
+    const summary = document.createElement('summary'); summary.textContent = 'Delivery events';
+    const content = document.createElement('div'); content.className = 'delivery-events';
+    details.append(summary, content);
+    details.addEventListener('toggle', async () => {
+      if (!details.open || details.dataset.loaded === 'true' || details.dataset.loading === 'true') return;
+      details.dataset.loading = 'true'; content.textContent = 'Loading delivery events…';
+      try {
+        const result = await api(`/api/history/${encodeURIComponent(email.id)}`);
+        content.replaceChildren();
+        if (result.delivery_events.length === 0) {
+          const empty = document.createElement('p'); empty.textContent = 'No delivery events recorded. A Cloudflare event subscription is required.'; content.append(empty);
+        } else {
+          const events = document.createElement('ul');
+          for (const event of result.delivery_events) {
+            const row = document.createElement('li');
+            row.textContent = `${event.recipient} · ${event.type} · ${new Date(event.occurred_at).toLocaleString()}`;
+            events.append(row);
+          }
+          content.append(events);
+          if (result.delivery_events_has_more) { const note = document.createElement('p'); note.textContent = 'Only the first 100 events are shown.'; content.append(note); }
+        }
+        details.dataset.loaded = 'true';
+      } catch (error) { content.textContent = `${error.message} Close and reopen to retry.`; }
+      finally { delete details.dataset.loading; }
+    });
+    item.append(subject, detail, details); list.append(item);
   }
   historyCursor = result.data.at(-1)?.id || null;
   $('#empty-history').hidden = list.children.length > 0;

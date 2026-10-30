@@ -21,10 +21,10 @@ export default {
       return createAuth(env).handler(request);
     }
     if (url.pathname === '/api/keys' || url.pathname.startsWith('/api/keys/')) return manageKeys(request, env);
-    if (url.pathname === '/api/history' && request.method === 'GET') {
+    if ((url.pathname === '/api/history' || url.pathname.startsWith('/api/history/')) && request.method === 'GET') {
       const admin = await authorizeAdmin(request, env);
       if (admin instanceof Response) return admin;
-      url.pathname = '/emails';
+      url.pathname = '/emails' + url.pathname.slice('/api/history'.length);
       return readHistory(new Request(url), env);
     }
     if (request.method === 'GET' && ['/dashboard', '/dashboard.js', '/dashboard.css'].includes(url.pathname)) {
