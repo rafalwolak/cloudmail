@@ -15,12 +15,33 @@ let resetToken = new URLSearchParams(location.search).get('token');
 const resetError = new URLSearchParams(location.search).get('error');
 const cloudflareResult = new URLSearchParams(location.search).get('cloudflare');
 const cloudflareConnected = cloudflareResult === 'connected';
-if (resetToken || resetError || ['connected', 'denied'].includes(cloudflareResult)) history.replaceState(null, '', location.pathname);
+if (resetToken || resetError || ['connected', 'denied'].includes(cloudflareResult)) history.replaceState(null, '', cloudflareResult ? '/dashboard/domains' : location.pathname);
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => { showView(button.dataset.view); announce(''); }));
+const dashboardPages = new Set(['overview', 'emails', 'inbox', 'compose', 'templates', 'domains', 'metrics', 'api-keys', 'webhooks']);
+function showDashboardPage(page, focus = false) {
+  if (!dashboardPages.has(page)) page = 'overview';
+  document.querySelectorAll('[data-dashboard-page]').forEach(section => { section.hidden = section.dataset.dashboardPage !== page; });
+  document.querySelectorAll('.dashboard-sidebar [data-page]').forEach(link => {
+    if (link.dataset.page === page) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  });
+  const names = { overview: 'Overview', emails: 'Sent emails', inbox: 'Inbox', compose: 'Send email', templates: 'Templates', domains: 'Domains', metrics: 'Metrics', 'api-keys': 'API keys', webhooks: 'Webhooks' };
+  $('#page-name').textContent = names[page];
+  document.title = `${names[page]} - Cloudmail`;
+  if (focus) { const heading = document.querySelector(`[data-dashboard-page="${page}"] h1, [data-dashboard-page="${page}"] h2, [data-dashboard-page="${page}"] h3`); heading?.setAttribute('tabindex', '-1'); heading?.focus(); }
+}
+function pageFromLocation() { return location.pathname.slice('/dashboard'.length).replace(/^\/|\/$/g, '') || 'overview'; }
+document.querySelectorAll('[data-page]').forEach(link => link.addEventListener('click', event => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault(); history.pushState(null, '', link.getAttribute('href')); showDashboardPage(link.dataset.page, true);
+}));
+window.addEventListener('popstate', () => showDashboardPage(pageFromLocation()));
 let cloudflareGeneration = 0;
 function setSignedIn(session) {
   metricsGeneration++; cloudflareGeneration++;
   showView(session ? 'dashboard' : 'login');
+  document.body.classList.toggle('signed-in', Boolean(session));
+  if (session) showDashboardPage(pageFromLocation());
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) { $('#account').textContent = `Signed in as ${session.user.email}`; if (cloudflareConnected) $('#cloudflare-status').textContent = 'Cloudflare connected. Choose zones to manage sending domains.'; }

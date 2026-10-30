@@ -168,3 +168,15 @@ test('Cloudflare integration endpoints require an administrator session', async 
     assert.equal(response.status, 401, `${method} ${path}`);
   }
 });
+
+
+test('dashboard pages support direct links and keep the account shell', async () => {
+  for (const page of ['emails', 'inbox', 'compose', 'templates', 'domains', 'metrics', 'api-keys', 'webhooks']) {
+    const response = await fetch(`${base}/dashboard/${page}`);
+    assert.equal(response.status, 200, page);
+    const html = await response.text();
+    assert.match(html, new RegExp(`data-dashboard-page="${page}"`));
+    assert.match(html, /aria-label="Dashboard navigation"/);
+    assert.match(response.headers.get('content-security-policy'), /script-src 'self'/);
+  }
+});

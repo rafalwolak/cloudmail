@@ -126,8 +126,8 @@ export default {
       url.pathname = '/templates' + url.pathname.slice('/api/templates'.length);
       return handleTemplates(new Request(url, request), env);
     }
-    if (request.method === 'GET' && ['/dashboard', '/dashboard.js', '/dashboard.css'].includes(url.pathname)) {
-      const path = url.pathname === '/dashboard' ? '/dashboard.html' : url.pathname;
+    if (request.method === 'GET' && (['/dashboard', '/dashboard.js', '/dashboard.css'].includes(url.pathname) || /^\/dashboard\/(emails|inbox|compose|templates|domains|metrics|api-keys|webhooks)\/?$/.test(url.pathname))) {
+      const path = url.pathname === '/dashboard' || url.pathname.startsWith('/dashboard/') ? '/dashboard.html' : url.pathname;
       const response = await env.ASSETS.fetch(new Request(new URL(path, url), request));
       const headers = new Headers(response.headers);
       headers.set('content-security-policy', "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
