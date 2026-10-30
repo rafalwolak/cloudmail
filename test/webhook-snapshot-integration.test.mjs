@@ -17,6 +17,11 @@ test('webhook delivery retrieval and replay preserve the stored payload in D1', 
     const path = `http://localhost/webhooks/${webhook}/deliveries/${delivery}`;
     const first = await worker.dispatchFetch(path); assert.equal(first.status, 200); const detail = await first.json(); assert.deepEqual(detail.payload, payload); assert.equal(detail.event_type, 'email.delivery_delayed');
     const list = await (await worker.dispatchFetch(`http://localhost/webhooks/${webhook}/deliveries`)).json(); assert.equal(list.data[0].event_type, 'email.delivery_delayed');
+    const events = await (await worker.dispatchFetch(`http://localhost/webhooks/${webhook}/events`)).json();
+    assert.deepEqual(events.data, [{ id: delivery, type: 'email.delivery_delayed', created_at: '2030-01-01T00:00:00.000Z', status: 'pending' }]);
+    const event = await (await worker.dispatchFetch(`http://localhost/webhooks/${webhook}/events/${delivery}`)).json();
+    assert.equal(event.object, 'webhook_event'); assert.equal(event.next_attempt_at, '2030-01-01T00:00:00.000Z'); assert.deepEqual(event.payload, payload);
+    assert.equal((await worker.dispatchFetch(`http://localhost/webhooks/${webhook}/events?before=${delivery}`)).status, 400);
     const replay = await worker.dispatchFetch(`${path}/replay`, { method: 'POST' }); assert.equal(replay.status, 201);
     const replayId = (await replay.json()).id;
     const retried = await worker.dispatchFetch(`http://localhost/webhooks/${webhook}/deliveries/${replayId}`);

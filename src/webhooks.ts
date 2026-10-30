@@ -25,6 +25,22 @@ export async function webhookHeaders(secret: string, id: string, timestamp: numb
 
 export async function manageWebhooks(request: Request, env: AuthEnv): Promise<Response> {
   const path = new URL(request.url).pathname;
+  const eventsPath = path.match(/^\/webhooks\/([0-9a-f-]{36})\/events(?:\/([0-9a-f]{32}))?$/);
+  if (eventsPath && request.method === 'GET') {
+    const url = new URL(request.url);
+    url.pathname = `/webhooks/${eventsPath[1]}/deliveries${eventsPath[2] ? `/${eventsPath[2]}` : ''}`;
+    const response = await manageWebhooks(new Request(url, request), env);
+    if (!response.ok) return response;
+    type Delivery = { id: string; event_type: string; occurred_at: string; state: string; next_attempt: string | null; payload: unknown };
+    const status = (state: string) => state === 'sending' ? 'attempting' : state === 'delivered' ? 'success' : state;
+    const format = (item: Delivery) => ({ id: item.id, type: item.event_type, created_at: item.occurred_at, status: status(item.state) });
+    if (eventsPath[2]) {
+      const item = await response.json() as Delivery;
+      return json({ object: 'webhook_event', ...format(item), next_attempt_at: item.state === 'pending' ? item.next_attempt : null, payload: item.payload });
+    }
+    const list = await response.json() as { data: Delivery[]; has_more: boolean };
+    return json({ object: 'list', has_more: list.has_more, data: list.data.map(format) });
+  }
   if (path === '/webhooks' && request.method === 'GET') {
     const rows = await env.DB.prepare('SELECT id, endpoint, events, created_at FROM webhooks ORDER BY created_at DESC, id DESC LIMIT 100').all<{ id: string; endpoint: string; events: string; created_at: string }>();
     return json({ object: 'list', data: rows.results.map(row => ({ ...row, events: JSON.parse(row.events) })) });
