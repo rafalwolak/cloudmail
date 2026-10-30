@@ -16,12 +16,36 @@ const resetError = new URLSearchParams(location.search).get('error');
 if (resetToken || resetError) history.replaceState(null, '', location.pathname);
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => { showView(button.dataset.view); announce(''); }));
 function setSignedIn(session) {
+  metricsGeneration++;
   showView(session ? 'dashboard' : 'login');
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) $('#account').textContent = `Signed in as ${session.user.email}`;
-  else { resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
+  else { $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; $('#template-form').reset(); $('#template-form').hidden = true; templateId = null; templateDirty = false; }
 }
+let metricsGeneration = 0;
+$('#metrics-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const generation = ++metricsGeneration;
+  const button = event.currentTarget.querySelector('button');
+  const output = $('#metrics-results');
+  const message = $('#metrics-status');
+  button.disabled = true; output.replaceChildren(); message.textContent = 'Loading overview…';
+  const end = new Date();
+  const start = new Date(end.getTime() - Number($('#metrics-range').value) * 86400000);
+  const params = new URLSearchParams({ start_date: start.toISOString(), end_date: end.toISOString() });
+  try {
+    const result = await api(`/api/history/metrics?${params}`);
+    if (generation !== metricsGeneration) return;
+    const labels = { sent: 'Accepted messages', delivered: 'Delivered recipients', deferred: 'Deferred recipients', bounced: 'Bounced recipients', failed: 'Failed recipients', rejected: 'Rejected recipients', complained: 'Complaining recipients' };
+    for (const [key, label] of Object.entries(labels)) {
+      const item = document.createElement('div'); const term = document.createElement('dt'); const value = document.createElement('dd');
+      term.textContent = label; value.textContent = new Intl.NumberFormat().format(result.totals[key]); item.append(term, value); output.append(item);
+    }
+    message.textContent = `From ${new Date(result.start_date).toLocaleString()} to ${new Date(result.end_date).toLocaleString()}.`;
+  } catch (error) { if (generation === metricsGeneration) message.textContent = error.message; }
+  finally { button.disabled = false; }
+});
 async function loadKeys() {
   const { data } = await api('/api/keys');
   const list = $('#key-list');

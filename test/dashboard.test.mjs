@@ -21,9 +21,12 @@ test('dashboard provides registration and password recovery forms', async () => 
 
 test('dashboard email history requires a session', async () => {
   assert.equal((await fetch(`${base}/api/history`)).status, 401);
+  assert.equal((await fetch(`${base}/api/history/metrics`)).status, 401);
   assert.equal((await fetch(`${base}/api/history/00000000-0000-0000-0000-000000000000`)).status, 401);
   const html = await (await fetch(`${base}/dashboard`)).text();
   assert.match(html, /id="history-list"/);
+  assert.match(html, /id="metrics-form"/);
+  assert.match(html, /id="metrics-status" role="status"/);
 });
 
 test('verified administrator can read history with a session', { skip: !process.env.TEST_DASHBOARD_ADMIN }, async () => {
@@ -36,6 +39,9 @@ test('verified administrator can read history with a session', { skip: !process.
   const history = await fetch(`${base}/api/history?limit=2`, { headers: { cookie } });
   assert.equal(history.status, 200);
   assert.equal(history.headers.get('cache-control'), 'no-store');
+  const metrics = await fetch(`${base}/api/history/metrics`, { headers: { cookie } });
+  assert.equal(metrics.status, 200);
+  assert.equal(typeof (await metrics.json()).totals.sent, 'number');
   const data = (await history.json()).data;
   assert.equal(data.length, 2);
   const detail = await fetch(`${base}/api/history/${data[0].id}`, { headers: { cookie } });
