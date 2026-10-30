@@ -47,7 +47,8 @@ export async function readReceived(request: Request, env: InboundEnv): Promise<R
   if (match[2] !== undefined) {
     const attachment = parsed.attachments[Number(match[2])];
     if (!attachment) return response({ message: 'Not found' }, 404);
-    return new Response(bytes(attachment.content), { headers: { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' } });
+    const filename = attachment.filename ? encodeURIComponent(new TextDecoder().decode(new TextEncoder().encode(attachment.filename))).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`) : null;
+    return new Response(bytes(attachment.content), { headers: { 'content-type': 'application/octet-stream', 'content-disposition': filename ? `attachment; filename*=UTF-8''${filename}` : 'attachment', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' } });
   }
   return response({ id: row.id, from: row.sender, to: row.recipient, subject: parsed.subject ?? row.subject, created_at: row.created_at, text: parsed.text ?? null, html: parsed.html ?? null, message_id: parsed.messageId ?? null, attachments: parsed.attachments.map((attachment, index) => ({ id: String(index), filename: attachment.filename, content_type: attachment.mimeType, size: bytes(attachment.content).byteLength })) });
 }

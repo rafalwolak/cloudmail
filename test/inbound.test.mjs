@@ -49,8 +49,18 @@ test('returns attachments as downloads with safe response headers', async () => 
   assert.equal(detail.attachments[0].filename, 'unsafe.html');
   const attachment = await readReceived(new Request(`https://example.com/emails/receiving/${id}/attachments/0`), context.env);
   assert.equal(attachment.headers.get('content-type'), 'application/octet-stream');
-  assert.equal(attachment.headers.get('content-disposition'), 'attachment');
+  assert.equal(attachment.headers.get('content-disposition'), "attachment; filename*=UTF-8''unsafe.html");
   assert.match(await attachment.text(), /<script>/);
+});
+
+test('encodes untrusted Unicode attachment filenames in download headers', async () => {
+  const context = fixture();
+  const mime = 'MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="test"\r\n\r\n--test\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename*=UTF-8\'\'raport%20%C5%BC%C3%B3%C5%82w%3B%22.txt\r\n\r\ncontent\r\n--test--\r\n';
+  context.message.raw = new Blob([mime]).stream(); context.message.rawSize = mime.length;
+  await receiveEmail(context.message, context.env);
+  const id = [...context.rows.keys()][0];
+  const attachment = await readReceived(new Request(`https://example.com/emails/receiving/${id}/attachments/0`), context.env);
+  assert.equal(attachment.headers.get('content-disposition'), "attachment; filename*=UTF-8''raport%20%C5%BC%C3%B3%C5%82w%3B%22.txt");
 });
 
 
