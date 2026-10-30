@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Dashboard - Cloudmail</title>
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/dashboard.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="bar"><a class="brand" href="/">✳ CLOUDMAIL</a><span>TRANSACTIONAL EMAIL</span><a href="https://github.com/rafalwolak/cloudmail">Documentation ↗</a></header>
+  <main id="main" class="layout">
+    <section class="intro"><span class="eyebrow">YOUR WORKSPACE / 01</span><h1>Make email<br>your own.</h1><p>Manage access to your Cloudmail installation. Your infrastructure, your keys.</p><div class="note"><span>✳</span><p>Cloudmail is in early development. Configure a verified sending domain before sending transactional email.</p></div></section>
+    <section class="workspace" aria-label="Account workspace">
+      <div id="login-view"><div class="section-top"><span class="eyebrow">SECURE ACCESS</span><span class="step">01 / 02</span></div><h2 id="workspace-title">Sign in</h2><p>Use the account configured for this installation.</p>
+        <form id="login-form"><label for="email">Email address</label><input id="email" name="email" type="email" autocomplete="email" required><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required><button type="submit">Sign in <span aria-hidden="true">↗</span></button></form>
+        <p class="help">New installation? Configure sign-up and your sender first. <a href="https://github.com/rafalwolak/cloudmail#deploy">Read setup instructions</a>.</p>
+      </div>
+      <div id="dashboard-view" hidden><div class="section-top"><span class="eyebrow">WORKSPACE</span><button id="sign-out" class="text-button" type="button">Sign out</button></div><h2>API keys</h2><p id="account"></p><p>Keys grant access to all sending domains in this installation. Store them securely.</p>
+        <form id="key-form"><label for="key-name">Key name</label><div class="key-entry"><input id="key-name" name="name" maxlength="100" required placeholder="Production server"><button type="submit">Create key <span aria-hidden="true">↗</span></button></div></form>
+        <div id="new-key" class="secret" hidden><strong>Copy your key now</strong><p>This key will not be shown again.</p><code id="key-value"></code><button id="copy-key" class="secondary" type="button">Copy key</button></div>
+        <h3>Active keys</h3><ul id="key-list" class="key-list"></ul><p id="empty-keys" hidden>No API keys yet. Create one to get started.</p>
+      </div>
+      <p id="status" role="status" aria-live="polite"></p>
+    </section>
+  </main><footer>Cloudmail <span>Built on Cloudflare · Open source</span></footer>
+</body></html>
