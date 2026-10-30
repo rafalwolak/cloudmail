@@ -46,11 +46,18 @@ export function parseEmail(value: unknown): OutboundEmail | string {
   const unsupported = Object.keys(email).filter(key => !allowedFields.has(key));
   if (unsupported.length) return `Unsupported fields: ${unsupported.join(', ')}`;
   if (!nonempty(email.from) || !addresses(email.to) || !nonempty(email.subject) || (!nonempty(email.text) && !nonempty(email.html))) return 'from, to, subject and text or html are required';
+  if ([...email.subject].length > 998 || /[\r\n]/.test(email.subject)) return 'subject must be at most 998 characters and contain no line breaks';
   if ((email.text !== undefined && typeof email.text !== 'string') || (email.html !== undefined && typeof email.html !== 'string')) return 'text and html must be strings';
   if (email.cc !== undefined && !addresses(email.cc)) return 'Invalid cc';
   if (email.bcc !== undefined && !addresses(email.bcc)) return 'Invalid bcc';
   if (email.reply_to !== undefined && !nonempty(email.reply_to)) return 'reply_to must be a single address';
   if (email.headers !== undefined && (!email.headers || typeof email.headers !== 'object' || Array.isArray(email.headers) || !Object.values(email.headers).every(value => typeof value === 'string'))) return 'headers must contain string values';
+  if (email.headers !== undefined) {
+    const headers = email.headers as Record<string, string>;
+    if (Object.entries(headers).some(([name, value]) => !/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name) || /[\r\n]/.test(value))) return 'Invalid custom header name or value';
+    const bytes = new TextEncoder().encode(Object.entries(headers).map(([name, value]) => `${name}: ${value}\r\n`).join('')).byteLength;
+    if (bytes > 16000) return 'Custom headers exceed 16 KB';
+  }
   if (email.tags !== undefined && (!Array.isArray(email.tags) || email.tags.length > 100 || !email.tags.every(tag => tag && typeof tag === 'object' && !Array.isArray(tag) && Object.keys(tag).length === 2 && typeof tag.name === 'string' && /^[A-Za-z0-9_-]{1,256}$/.test(tag.name) && typeof tag.value === 'string' && /^[A-Za-z0-9_-]{1,256}$/.test(tag.value)))) return 'Invalid tags';
   const attachments = email.attachments === undefined ? undefined : parseAttachments(email.attachments);
   if (attachments === null) return 'Invalid attachments: use up to 32 base64-encoded files';
