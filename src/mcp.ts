@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
 import { parseEmail } from './email';
+import { resolveTemplate } from './templates';
 import { IdempotencyConflict, readHistory, sendRecordedEmail } from './history';
 import type { AuthEnv } from './auth';
 
@@ -14,15 +15,18 @@ export async function handleMcp(request: Request, env: AuthEnv): Promise<Respons
   server.registerTool('send_email', {
     description: 'Send a transactional email. The sender domain must be configured in Cloudflare Email Service. Do not use for marketing email.',
     inputSchema: z.object({
-      from: z.string(), to: addresses, subject: z.string(), text: z.string().optional(), html: z.string().optional(),
+      from: z.string().optional(), to: addresses, subject: z.string().optional(), text: z.string().optional(), html: z.string().optional(),
       cc: addresses.optional(), bcc: addresses.optional(), reply_to: z.string().optional(), headers: z.record(z.string(), z.string()).optional(),
       idempotency_key: z.string().min(1).max(256).optional(),
+      template: z.object({ id: z.string(), variables: z.record(z.string(), z.union([z.string(), z.number()])).optional() }).strict().optional(),
       attachments: z.array(z.object({ filename: z.string(), content: z.string(), content_type: z.string().optional(), content_id: z.string().optional() }).strict()).optional(),
     }).strict(),
     annotations: { destructiveHint: false, readOnlyHint: false, idempotentHint: false, openWorldHint: true },
   }, async args => {
     const { idempotency_key, ...payload } = args;
-    const email = parseEmail(payload);
+    const resolved = await resolveTemplate(payload, env);
+    if (typeof resolved === 'string') return { isError: true, content: [{ type: 'text', text: resolved }] };
+    const email = parseEmail(resolved);
     if (typeof email === 'string') return { isError: true, content: [{ type: 'text', text: email }] };
     try {
       const result = await sendRecordedEmail(env, email, idempotency_key);

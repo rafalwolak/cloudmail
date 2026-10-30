@@ -1,6 +1,7 @@
 import type { AuthEnv } from './auth';
 import { parseEmail, type OutboundEmail } from './email';
 import { sendRecordedEmail } from './history';
+import { resolveTemplate } from './templates';
 
 async function digest(value: string): Promise<string> {
   const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
@@ -14,7 +15,9 @@ export async function sendBatch(request: Request, env: AuthEnv): Promise<Respons
   if (request.headers.has('x-batch-validation')) return Response.json({ message: 'Batch validation modes are not supported' }, { status: 400 });
   const emails: OutboundEmail[] = [];
   for (const [index, item] of body.entries()) {
-    const parsed = parseEmail(item);
+    const resolved = await resolveTemplate(item, env);
+    if (typeof resolved === 'string') return Response.json({ message: resolved, index }, { status: 400 });
+    const parsed = parseEmail(resolved);
     if (typeof parsed === 'string') return Response.json({ message: parsed, index }, { status: 400 });
     emails.push(parsed);
   }

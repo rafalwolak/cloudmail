@@ -1,0 +1,54 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:8787';
+const key = process.env.TEST_API_KEY || 'local-test-key';
+const headers = { authorization: `Bearer ${key}`, 'content-type': 'application/json' };
+const call = (path, method, body) => fetch(`${base}${path}`, { method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+
+test('template drafts must be published before sending', async () => {
+  const created = await call('/templates', 'POST', { name: 'Welcome', html: '<p>Hello {{{NAME}}}</p>', variables: [{ key: 'NAME', type: 'string' }] });
+  assert.equal(created.status, 200, await created.clone().text());
+  const { id } = await created.json();
+  const message = { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Welcome', template: { id, variables: { NAME: 'Jane' } } };
+  assert.equal((await call('/emails', 'POST', message)).status, 400);
+  assert.equal((await call(`/templates/${id}/publish`, 'POST')).status, 200);
+  const sent = await call('/emails', 'POST', message);
+  assert.equal(sent.status, 200, await sent.clone().text());
+  assert.ok((await sent.json()).id);
+  assert.equal((await call(`/templates/${id}`, 'DELETE')).status, 200);
+});
+
+test('template management requires authentication', async () => {
+  assert.equal((await fetch(`${base}/templates`)).status, 401);
+});
+
+test('editing a draft does not change the published version until republished', async () => {
+  const created = await call('/templates', 'POST', { name: 'Snapshot', html: '<p>Hi</p>', from: 'sender@example.com', subject: 'Published' });
+  const { id } = await created.json();
+  assert.equal((await call(`/templates/${id}/publish`, 'POST')).status, 200);
+  assert.equal((await call(`/templates/${id}`, 'PATCH', { subject: 'Updated' })).status, 200);
+  const send = async () => {
+    const response = await call('/emails', 'POST', { to: 'recipient@example.com', template: { id } });
+    assert.equal(response.status, 200, await response.clone().text());
+    return (await response.json()).id;
+  };
+  const first = await send();
+  assert.equal((await (await call(`/emails/${first}`, 'GET')).json()).subject, 'Published');
+  assert.equal((await call(`/templates/${id}/publish`, 'POST')).status, 200);
+  const second = await send();
+  assert.equal((await (await call(`/emails/${second}`, 'GET')).json()).subject, 'Updated');
+  await call(`/templates/${id}`, 'DELETE');
+});
+
+test('published templates can be used in batch sends', async () => {
+  const created = await call('/templates', 'POST', { name: 'Batch template', html: '<p>{{{NAME}}}</p>', from: 'sender@example.com', subject: 'Hello', variables: [{ key: 'NAME', type: 'string', fallback_value: 'friend' }] });
+  const { id } = await created.json();
+  assert.equal((await call(`/templates/${id}/publish`, 'POST')).status, 200);
+  const response = await call('/emails/batch', 'POST', [
+    { to: 'first@example.com', template: { id } },
+    { to: 'second@example.com', template: { id, variables: { NAME: 'Jane' } } },
+  ]);
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal((await response.json()).data.length, 2);
+  await call(`/templates/${id}`, 'DELETE');
+});
