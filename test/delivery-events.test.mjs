@@ -31,3 +31,12 @@ test('preserves bounded delivery and bounce diagnostics', () => {
   const untrusted = { ...bounced, payload: { ...bounced.payload, delivery: { smtpResponse: 'x'.repeat(3000), deliveryTimeMs: -1 }, bounce: { type: { value: 'hard' } } } };
   assert.deepEqual(parseDeliveryEvent(untrusted).details, {});
 });
+
+test('preserves documented rejection and failure diagnostics', () => {
+  const rejected = { ...event, type: 'cf.email.sending.message.rejected', payload: { ...event.payload, terminal: true, delivery: { status: 'rejected', provider: 'external_smtp' }, rejection: { reason: 'suppressed', party: 'recipient', detail: 'Recipient is suppressed' } } };
+  assert.deepEqual(parseDeliveryEvent(rejected).details, { provider: 'external_smtp', rejection_reason: 'suppressed', rejection_party: 'recipient', rejection_detail: 'Recipient is suppressed', terminal: true });
+  const failed = { ...event, type: 'cf.email.sending.message.failed', payload: { ...event.payload, terminal: true, failure: { reason: 'delivery_failed' } } };
+  assert.deepEqual(parseDeliveryEvent(failed).details, { failure_reason: 'delivery_failed', terminal: true });
+  const oversized = { ...failed, payload: { ...failed.payload, terminal: 'true', failure: { reason: 'x'.repeat(2049) } } };
+  assert.deepEqual(parseDeliveryEvent(oversized).details, {});
+});
