@@ -34,15 +34,17 @@ $('#compose-form').addEventListener('submit', async event => {
   if (!text.trim() && !html.trim()) { message.textContent = 'Provide plain text, HTML or both.'; $('#compose-text').focus(); return; }
   if (to.length + cc.length + bcc.length > 50) { message.textContent = 'Use at most 50 recipients across To, Cc and Bcc.'; return; }
   if (files.length > 32 || files.reduce((sum, file) => sum + file.size, 0) > 5 * 1024 * 1024) { message.textContent = 'Use at most 32 files and 5 MiB of attachments. The complete message must also fit Cloudflare limits.'; return; }
-  const payload = { from: $('#compose-from').value.trim(), to, subject: $('#compose-subject').value, ...(text && { text }), ...(html && { html }), ...(cc.length && { cc }), ...(bcc.length && { bcc }), ...($('#compose-reply').value.trim() && { reply_to: $('#compose-reply').value.trim() }) };
-  if (!window.confirm(`Send this transactional email?\nTo: ${to.join(', ')}\nCc: ${cc.join(', ') || 'None'}\nBcc: ${bcc.join(', ') || 'None'}\nSubject: ${payload.subject}`)) return;
+  const scheduleInput = $('#compose-schedule'); const schedule = scheduleInput.value ? new Date(scheduleInput.value) : null;
+  if (schedule && (!Number.isFinite(schedule.getTime()) || schedule.getTime() <= Date.now() || schedule.getTime() > Date.now() + 30 * 86400000)) { message.textContent = 'Choose a future time within the next 30 days.'; scheduleInput.focus(); return; }
+  const payload = { from: $('#compose-from').value.trim(), to, subject: $('#compose-subject').value, ...(text && { text }), ...(html && { html }), ...(cc.length && { cc }), ...(bcc.length && { bcc }), ...($('#compose-reply').value.trim() && { reply_to: $('#compose-reply').value.trim() }), ...(schedule && { scheduled_at: schedule.toISOString() }) };
+  if (!window.confirm(`${schedule ? `Schedule this transactional email for ${schedule.toLocaleString()}?` : 'Send this transactional email now?'}\nTo: ${to.join(', ')}\nCc: ${cc.join(', ') || 'None'}\nBcc: ${bcc.join(', ') || 'None'}\nSubject: ${payload.subject}`)) return;
   composeKey ??= crypto.randomUUID(); fields.disabled = true; message.textContent = 'Sending…';
   try {
     if (files.length) payload.attachments = await Promise.all(files.map(file => new Promise((resolve, reject) => {
       const reader = new FileReader(); reader.onerror = () => reject(new Error('Could not read attachment.')); reader.onload = () => resolve({ filename: file.name, content: String(reader.result).split(',')[1], content_type: file.type || 'application/octet-stream' }); reader.readAsDataURL(file);
     })));
     const result = await api('/api/send', { method: 'POST', headers: { 'Idempotency-Key': composeKey }, body: JSON.stringify(payload) });
-    form.reset(); composeKey = null; message.textContent = `Accepted by Cloudflare. Email ID: ${result.id}. Delivery is not yet confirmed.`;
+    form.reset(); composeKey = null; message.textContent = schedule ? `Scheduled for ${schedule.toLocaleString()}. Email ID: ${result.id}. Delivery is not yet confirmed.` : `Accepted by Cloudflare. Email ID: ${result.id}. Delivery is not yet confirmed.`;
     try { await loadHistory(true); } catch { /* The email was accepted even if the history refresh fails. */ }
   } catch (error) { message.textContent = `${error.message} Check history before trying again; sending may be uncertain.`; }
   finally { fields.disabled = false; }

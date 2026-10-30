@@ -47,6 +47,14 @@ test('dashboard send requires an administrator and trusted origin', { skip: !pro
   assert.deepEqual(details.cc, message.cc);
   assert.deepEqual(details.bcc, message.bcc);
   assert.equal(details.reply_to, message.reply_to);
+  const scheduledAt = new Date(Date.now() + 120000).toISOString();
+  const scheduled = await fetch(path, { method: 'POST', headers: { ...headers, 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ ...message, scheduled_at: scheduledAt }) });
+  assert.equal(scheduled.status, 200);
+  const scheduledId = (await scheduled.json()).id;
+  const scheduledDetails = await (await fetch(`${base}/api/history/${scheduledId}`, { headers: { cookie } })).json();
+  assert.equal(scheduledDetails.status, 'scheduled');
+  assert.equal(scheduledDetails.scheduled_at, scheduledAt);
+  assert.equal((await fetch(`${base}/api/history/${scheduledId}/cancel`, { method: 'POST', headers: { cookie, origin: base } })).status, 200);
 });
 
 test('verified administrator can read history with a session', { skip: !process.env.TEST_DASHBOARD_ADMIN }, async () => {
