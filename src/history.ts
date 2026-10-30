@@ -109,10 +109,24 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
     const result = await env.DB.prepare(`SELECT id, recipient, type, occurred_at, details FROM delivery_events WHERE provider_id = ? ${condition} ORDER BY occurred_at ASC, id ASC LIMIT ?`).bind(email.provider_id, ...values, Number(raw) + 1).all<{ id: string; recipient: string; type: string; occurred_at: string; details: string }>();
     return Response.json({ object: 'list', data: result.results.slice(0, Number(raw)).map(event => ({ ...event, details: JSON.parse(event.details) })), has_more: result.results.length > Number(raw) }, { headers: { 'cache-control': 'no-store' } });
   }
+  const attachmentMatch = url.pathname.match(/^\/emails\/([0-9a-f-]{36})\/attachments\/(\d+)$/);
+  if (attachmentMatch) {
+    const row = await env.DB.prepare('SELECT body_stored FROM email_history WHERE id = ?').bind(attachmentMatch[1]).first<{ body_stored: number }>();
+    if (!row || !row.body_stored) return Response.json({ message: 'Not found' }, { status: 404 });
+    try {
+      const stored = await readSentContent(env.INBOUND, attachmentMatch[1]);
+      if (!stored) throw new Error('Missing content');
+      const attachment = stored.attachments?.[Number(attachmentMatch[2])];
+      if (!attachment) return Response.json({ message: 'Not found' }, { status: 404 });
+      const bytes = Uint8Array.from(atob(attachment.content), char => char.charCodeAt(0));
+      const filename = encodeURIComponent(new TextDecoder().decode(new TextEncoder().encode(attachment.filename))).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+      return new Response(bytes, { headers: { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename*=UTF-8''${filename}`, 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' } });
+    } catch { return Response.json({ message: 'Email content is unavailable' }, { status: 503, headers: { 'cache-control': 'no-store' } }); }
+  }
   const id = url.pathname.slice('/emails/'.length);
   const row = await env.DB.prepare(`SELECT ${fields}, provider_id, body_stored FROM ${tables} WHERE email_history.id = ?`).bind(id).first<HistoryRow & { provider_id: string | null; body_stored: number }>();
   if (!row) return Response.json({ message: 'Not found' }, { status: 404 });
-  let html: string | null = null; let text: string | null = null;
+  let html: string | null = null; let text: string | null = null; let attachments: { id: string; filename: string; content_type: string; size: number }[] | null = null;
   if (row.schedule_state === 'scheduled') {
     const scheduled = await env.DB.prepare("SELECT payload, payload_r2_key FROM scheduled_emails WHERE id = ? AND state = 'scheduled'").bind(id).first<{ payload: string | null; payload_r2_key: string | null }>();
     if (scheduled) {
@@ -131,8 +145,9 @@ export async function readHistory(request: Request, env: AuthEnv & { INBOUND: R2
       const content = await readSentContent(env.INBOUND, id);
       if (!content) throw new Error('Missing email content');
       html = content.html; text = content.text;
+      attachments = content.attachments?.map((item, index) => ({ id: String(index), filename: item.filename, content_type: item.type, size: item.content.length / 4 * 3 - (item.content.endsWith('==') ? 2 : item.content.endsWith('=') ? 1 : 0) })) ?? null;
     } catch { return Response.json({ message: 'Email content is unavailable' }, { status: 503, headers: { 'cache-control': 'no-store' } }); }
   }
   const events = row.provider_id ? await env.DB.prepare('SELECT recipient, type, occurred_at, details FROM delivery_events WHERE provider_id = ? ORDER BY occurred_at ASC, id ASC LIMIT 101').bind(row.provider_id).all<{ recipient: string; type: string; occurred_at: string; details: string }>() : { results: [] }; 
-  return Response.json({ object: 'email', ...format(row), html, text, delivery_events: events.results.slice(0, 100).map(event => ({ ...event, details: JSON.parse(event.details) })), delivery_events_has_more: events.results.length > 100 }, { headers: { 'cache-control': 'no-store' } });
+  return Response.json({ object: 'email', ...format(row), html, text, attachments, delivery_events: events.results.slice(0, 100).map(event => ({ ...event, details: JSON.parse(event.details) })), delivery_events_has_more: events.results.length > 100 }, { headers: { 'cache-control': 'no-store' } });
 }

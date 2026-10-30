@@ -326,6 +326,16 @@ async function loadHistory(reset = false) {
           const pre = document.createElement('pre'); pre.className = 'inbox-body'; pre.textContent = value;
           bodyContent.append(heading, pre);
         }
+        if (result.attachments?.length) {
+          const heading = document.createElement('strong'); heading.textContent = 'Attachments'; bodyContent.append(heading);
+          const list = document.createElement('ul');
+          for (const attachment of result.attachments) {
+            const row = document.createElement('li'); const link = document.createElement('a');
+            link.href = `/api/history/${encodeURIComponent(email.id)}/attachments/${encodeURIComponent(attachment.id)}`;
+            link.textContent = `${attachment.filename || 'Attachment'} (${attachment.size} bytes)`; link.setAttribute('download', ''); row.append(link); list.append(row);
+          }
+          bodyContent.append(list);
+        }
         if (!bodyContent.children.length) bodyContent.textContent = 'Content is unavailable for this message.';
         bodyDetails.dataset.loaded = 'true';
       } catch (error) { bodyContent.textContent = `${error.message} Close and reopen to retry.`; }
