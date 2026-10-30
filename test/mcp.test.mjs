@@ -1,0 +1,33 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+const base = process.env.TEST_BASE_URL || 'http://127.0.0.1:8787';
+const key = process.env.TEST_API_KEY || 'local-test-key';
+
+test('MCP requires authentication', async () => {
+  const response = await fetch(`${base}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'test', version: '1' } } }) });
+  assert.equal(response.status, 401);
+});
+
+test('MCP client discovers and calls the transactional send tool', async () => {
+  const client = new Client({ name: 'cloudmail-test', version: '1.0.0' });
+  const transport = new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { authorization: `Bearer ${key}` } } });
+  try {
+    await client.connect(transport);
+    const tools = await client.listTools();
+    assert.ok(tools.tools.some(tool => tool.name === 'send_email'));
+    const result = await client.callTool({ name: 'send_email', arguments: { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Test', text: 'Hello' } });
+    assert.notEqual(result.isError, true);
+    assert.ok(JSON.parse(result.content[0].text).id);
+    const invalid = await client.callTool({ name: 'send_email', arguments: { from: 'sender@example.com', to: 'recipient@example.com', subject: 'Test', text: 'Hello', scheduled_at: '2027-01-01' } });
+    assert.equal(invalid.isError, true);
+  } finally { await client.close(); }
+});
+
+
+test('MCP rejects requests from an untrusted browser origin', async () => {
+  const response = await fetch(`${base}/mcp`, { method: 'POST', headers: { authorization: `Bearer ${key}`, origin: 'https://attacker.example', 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: '{}' });
+  assert.equal(response.status, 403);
+});

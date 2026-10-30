@@ -1,5 +1,6 @@
 import { createAuth, type AuthEnv } from './auth';
 import { parseEmail } from './email';
+import { handleMcp } from './mcp';
 import { isValidKey, manageKeys, type KeyEnv } from './keys';
 
 interface Env extends AuthEnv, KeyEnv { API_KEY: string; ASSETS: Fetcher }
@@ -25,10 +26,11 @@ export default {
       return new Response(response.body, { status: response.status, headers });
     }
     if (url.pathname === '/' && request.method === 'GET') return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'", 'x-content-type-options': 'nosniff' } });
-    if (url.pathname !== '/emails' || request.method !== 'POST') return Response.json({ message: 'Not found' }, { status: 404 });
+    if (url.pathname !== '/mcp' && (url.pathname !== '/emails' || request.method !== 'POST')) return Response.json({ message: 'Not found' }, { status: 404 });
     const authorization = request.headers.get('Authorization') || '';
     const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
     if (!(env.API_KEY && token === env.API_KEY) && !await isValidKey(env.DB, token, env.ADMIN_EMAIL)) return Response.json({ message: 'Unauthorized' }, { status: 401 });
+    if (url.pathname === '/mcp') return handleMcp(request, env);
     let data: unknown;
     try { data = await request.json(); } catch { return Response.json({ message: 'Invalid JSON' }, { status: 400 }); }
     const email = parseEmail(data);
