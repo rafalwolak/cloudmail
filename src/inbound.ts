@@ -2,13 +2,19 @@ import PostalMime from 'postal-mime';
 import { attachmentForAgent } from './agent-attachment.ts';
 import { attachmentList } from './attachment-list.ts';
 
-export interface InboundEnv { DB: D1Database; INBOUND: R2Bucket; INBOUND_ENABLED?: string; INBOUND_ADDRESSES?: string }
+export interface InboundEnv { DB: D1Database; INBOUND: R2Bucket; INBOUND_ENABLED?: string; INBOUND_ADDRESSES?: string; INBOUND_ALLOW_PLUS_ADDRESSES?: string }
 interface InboundRow { id: string; sender: string; recipient: string; subject: string; created_at: string; object_key: string }
 const response = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'cache-control': 'no-store' } });
 
 export async function receiveEmail(message: ForwardableEmailMessage, env: InboundEnv): Promise<void> {
   const allowed = (env.INBOUND_ADDRESSES ?? '').split(',').map(address => address.trim().toLowerCase()).filter(Boolean);
-  if (env.INBOUND_ENABLED !== 'true' || !allowed.includes(message.to.toLowerCase())) { message.setReject('Recipient is not configured'); return; }
+  const recipient = message.to.toLowerCase();
+  const at = recipient.indexOf('@');
+  const plus = recipient.indexOf('+');
+  const base = at > 0 && at === recipient.lastIndexOf('@') && plus > 0 && plus < at - 1
+    ? `${recipient.slice(0, plus)}${recipient.slice(at)}` : null;
+  const accepted = allowed.includes(recipient) || (env.INBOUND_ALLOW_PLUS_ADDRESSES === 'true' && base !== null && allowed.includes(base));
+  if (env.INBOUND_ENABLED !== 'true' || !accepted) { message.setReject('Recipient is not configured'); return; }
   if (message.rawSize > 25 * 1024 * 1024) { message.setReject('Message exceeds size limit'); return; }
   const id = crypto.randomUUID(); const objectKey = `inbound/${id}`;
   await env.INBOUND.put(objectKey, message.raw);

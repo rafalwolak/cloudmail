@@ -30,6 +30,24 @@ test('rejects disabled, unconfigured and oversized inbound messages', async () =
   }
 });
 
+
+test('plus addressing is opt-in and preserves the original envelope recipient', async () => {
+  for (const [address, enabled, accepted] of [
+    ['Inbox+orders@Example.com', false, false],
+    ['Inbox+orders@Example.com', true, true],
+    ['inbox+@example.com', true, false],
+    ['inbox+orders@other.example.com', true, false],
+    ['other+orders@example.com', true, false],
+    ['inbox+orders@example.com@other.example.com', true, false],
+  ]) {
+    const context = fixture(); context.message.to = address;
+    context.env.INBOUND_ALLOW_PLUS_ADDRESSES = String(enabled);
+    await receiveEmail(context.message, context.env);
+    assert.equal(!context.message.rejected, accepted, address);
+    assert.equal(context.rows.size, Number(accepted));
+    if (accepted) assert.equal([...context.rows.values()][0].recipient, address);
+  }
+});
 test('exposes message headers separately from SMTP envelope addresses', async () => {
   const context = fixture();
   const mime = 'From: Alice <alice@example.com>\r\nTo: Team: Bob <bob@example.com>, carol@example.com;\r\nCc: cc@example.com\r\nReply-To: Reply <reply@example.com>\r\nMessage-ID: <message@example.com>\r\nIn-Reply-To: <previous@example.com>\r\nReferences: <first@example.com> <previous@example.com>\r\n\r\nHello';
