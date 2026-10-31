@@ -7,7 +7,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
     "check": "tsc --noEmit",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:e2e": "playwright test"
   },
   "keywords": [],
   "author": "",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261030.1",
+    "@playwright/test": "^1.64.1",
     "@types/html-to-text": "^9.0.4",
     "esbuild": "^0.28.2",
     "miniflare": "^5.20261023.3-beta",

@@ -11,13 +11,13 @@ Review correctness, authorization, confidentiality, compatibility, and data inte
 - Sending: preserve idempotency conflicts, batch ordering and partial results, scheduling boundaries, cancellation cleanup, and the distinction between accepted and delivered. Do not automatically retry uncertain sends.
 - D1/R2: use bound SQL parameters; preserve ordering and cursor semantics. Add ordered migrations, exercise them on disposable data, and document rollback and data-loss limits. Verify cleanup failure behavior and private attachment access.
 - Webhooks/Queues: preserve signing bytes, delivery identity, saved payloads across retries/replays, leases, bounded retries, endpoint validation, and queue scoping. Treat responses and received content as untrusted.
-- Templates/UI: preserve escaping, immutable published snapshots, and preview sandbox/CSP restrictions. Check accessible names, keyboard navigation, focus, contrast, loading/empty/error/permission states, long content, and narrow viewports against WCAG 2.2.
+- Templates/UI: preserve escaping, immutable published snapshots, and preview sandbox/CSP restrictions. Check accessible names, keyboard navigation, focus, contrast, loading/empty/error/permission states, long content, and narrow viewports against WCAG 2.2. When moving a form into a disclosure, test existing-record edit actions open it before focusing. Keep attempt status separate from the latest recipient event; one recipient event is not a whole-message delivery result.
 - Performance: check bounded batch/query work, pagination, payload sizes, and unnecessary remote calls. Base optimizations on evidence.
 - Tests: add meaningful regression coverage for changed behavior using existing Node test and Miniflare patterns. Use Playwright for affected browser flows; distinguish manual exploration from committed E2E coverage.
 
 ## Validation and evidence
 
-Run `npm run check`, then `npm test` against the intended disposable local Worker with local D1 migrations applied. Report commands, environment, failures, and skips. See `SDLC.md` for the setup-time failing baseline. GitHub Actions runs these commands for PRs to `main` through `.github/workflows/ci.yml`, using local migrations and a local Worker. No lint/build script or Playwright E2E suite exists. Never treat deployment as validation or claim missing checks passed.
+Run `npm run check`, then `npm test` against the intended disposable local Worker with local D1 migrations applied. Report commands, environment, failures, and skips. See `SDLC.md` for the setup-time failing baseline. GitHub Actions runs these commands for PRs to `main` through `.github/workflows/ci.yml`, using local migrations and a local Worker. No dedicated lint/build script exists. Run the dashboard browser suite with `npm run test:e2e` after the Worker tests; it uses synthetic API fixtures and does not replace authorization coverage. Never treat deployment as validation or claim missing checks passed.
 
 ## Findings and gates
 

@@ -35,7 +35,7 @@ Communicate with the developer in Polish, including progress notes, questions, a
 
 ## Validation
 
-Run `npm run check`, then `npm test`. HTTP-dependent tests require local D1 migrations and a running local Worker; see `README.md` and `SDLC.md`. Report failures and skipped coverage honestly. CI for PRs to `main` is defined in `.github/workflows/ci.yml`; it provisions the local Worker and D1 state. There is no dedicated lint/build script or committed Playwright suite. Do not deploy as a check.
+Run `npm run check`, then `npm test`, then `npm run test:e2e`. HTTP-dependent tests require local D1 migrations and a running local Worker; see `README.md` and `SDLC.md`. Report failures and skipped coverage honestly. CI for PRs to `main` is defined in `.github/workflows/ci.yml`; it provisions the local Worker and D1 state. There is no dedicated lint/build script. The committed Playwright suite uses `playwright.config.ts`, synthetic API responses and the local Worker; install Chromium with `npx playwright install chromium` before running it. Do not deploy as a check.
 
 ## Git and publication
 

@@ -17,6 +17,19 @@ const cloudflareResult = new URLSearchParams(location.search).get('cloudflare');
 const cloudflareConnected = cloudflareResult === 'connected';
 if (resetToken || resetError || ['connected', 'denied'].includes(cloudflareResult)) history.replaceState(null, '', cloudflareResult ? '/dashboard/domains' : location.pathname);
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => { showView(button.dataset.view); announce(''); }));
+const navigationToggle = $('#navigation-toggle');
+function closeNavigation() {
+  $('#dashboard-sidebar').classList.remove('navigation-open');
+  navigationToggle.setAttribute('aria-expanded', 'false');
+}
+navigationToggle.addEventListener('click', () => {
+  const open = navigationToggle.getAttribute('aria-expanded') !== 'true';
+  $('#dashboard-sidebar').classList.toggle('navigation-open', open);
+  navigationToggle.setAttribute('aria-expanded', String(open));
+});
+$('#dashboard-sidebar').addEventListener('keydown', event => {
+  if (event.key === 'Escape' && navigationToggle.getAttribute('aria-expanded') === 'true') { closeNavigation(); navigationToggle.focus(); }
+});
 const dashboardPages = new Set(['overview', 'emails', 'inbox', 'compose', 'templates', 'domains', 'metrics', 'api-keys', 'webhooks']);
 function showDashboardPage(page, focus = false) {
   if (!dashboardPages.has(page)) page = 'overview';
@@ -26,8 +39,11 @@ function showDashboardPage(page, focus = false) {
     else link.removeAttribute('aria-current');
   });
   const names = { overview: 'Overview', emails: 'Sent emails', inbox: 'Inbox', compose: 'Send email', templates: 'Templates', domains: 'Domains', metrics: 'Metrics', 'api-keys': 'API keys', webhooks: 'Webhooks' };
+  closeNavigation();
   $('#page-name').textContent = names[page];
   document.title = `${names[page]} - Cloudmail`;
+  announce('');
+  if (document.body.classList.contains('signed-in')) void loadDashboardPage(page);
   if (focus) { const heading = document.querySelector(`[data-dashboard-page="${page}"] h1, [data-dashboard-page="${page}"] h2, [data-dashboard-page="${page}"] h3`); heading?.setAttribute('tabindex', '-1'); heading?.focus(); }
 }
 function pageFromLocation() { return location.pathname.slice('/dashboard'.length).replace(/^\/|\/$/g, '') || 'overview'; }
@@ -35,7 +51,24 @@ document.querySelectorAll('[data-page]').forEach(link => link.addEventListener('
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault(); history.pushState(null, '', link.getAttribute('href')); showDashboardPage(link.dataset.page, true);
 }));
-window.addEventListener('popstate', () => showDashboardPage(pageFromLocation()));
+window.addEventListener('popstate', () => showDashboardPage(pageFromLocation(), true));
+
+async function loadDashboardPage(page) {
+  // Load only the visible function so a failed integration cannot block other pages.
+  try {
+    if (page === 'emails') await loadHistory(true);
+    else if (page === 'inbox') await loadInbox(true);
+    else if (page === 'templates') await loadTemplates();
+    else if (page === 'api-keys') await loadKeys();
+    else if (page === 'webhooks') await loadWebhooks();
+    else if (page === 'metrics') $('#metrics-form').requestSubmit();
+    else if (page === 'domains') { await loadCloudflareStatus(); await loadSelectedCloudflareZones(); }
+  } catch (error) {
+    const messages = { emails: '#history-status', inbox: '#inbox-status', templates: '#template-status', webhooks: '#webhook-status', domains: '#cloudflare-status' };
+    if (messages[page]) $(messages[page]).textContent = error.message;
+    else announce(error.message);
+  }
+}
 let cloudflareGeneration = 0;
 function setSignedIn(session) {
   metricsGeneration++; cloudflareGeneration++;
@@ -44,7 +77,7 @@ function setSignedIn(session) {
   if (session) showDashboardPage(pageFromLocation());
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
-  if (session) { $('#account').textContent = `Signed in as ${session.user.email}`; if (cloudflareConnected) $('#cloudflare-status').textContent = 'Cloudflare connected. Choose zones to manage sending domains.'; }
+  if (session) { $('#account').textContent = session.user.email; if (cloudflareConnected) $('#cloudflare-status').textContent = 'Cloudflare connected. Choose zones to manage sending domains.'; }
   else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); resetComposeTemplatePicker(); updateComposeMode(); $('#compose-status').textContent = ''; composeKey = null; composeDirty = false; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; templateGeneration++; templateFilters = {}; $('#template-filter').reset(); $('#template-form').reset(); $('#template-form').hidden = true; $('#template-preview').hidden = true; $('#template-preview-content').replaceChildren(); templateId = null; templateDirty = false; }
   if (!session) { inboxGeneration++; inboxFilters = {}; $('#inbox-filter').reset(); historyGeneration++; historyFilters = {}; $('#history-filter').reset(); }
 }
@@ -414,6 +447,25 @@ async function loadKeys() {
     item.append(name, actions); list.append(item);
   }
 }
+function createEmailRecord(subject, recipient, state, createdAt, latestEvent = null) {
+  const record = document.createElement('details'); record.className = 'email-record';
+  const summary = document.createElement('summary');
+  const title = document.createElement('strong'); title.textContent = subject || '(No subject)';
+  const address = document.createElement('span'); address.className = 'record-recipient'; address.textContent = recipient;
+  const status = document.createElement('span'); status.className = 'record-status'; status.dataset.state = state;
+  status.textContent = state === 'accepted' ? 'Accepted by Cloudflare' : state.charAt(0).toUpperCase() + state.slice(1);
+  if (latestEvent) {
+    const event = document.createElement('span'); event.className = 'record-event';
+    event.textContent = `Latest recipient event: ${latestEvent.charAt(0).toUpperCase() + latestEvent.slice(1)}`;
+    status.append(event);
+  }
+  const time = document.createElement('time'); time.dateTime = createdAt;
+  time.textContent = new Date(createdAt).toLocaleString();
+  summary.append(title, address, status, time);
+  const content = document.createElement('div'); content.className = 'record-content';
+  record.append(summary, content);
+  return { record, content };
+}
 let historyCursor = null;
 let historyFilters = {};
 let historyGeneration = 0;
@@ -430,8 +482,9 @@ async function loadHistory(reset = false) {
   if (reset) list.replaceChildren();
   for (const email of result.data) {
     const item = document.createElement('li');
-    const subject = document.createElement('strong'); subject.textContent = email.subject;
-    const detail = document.createElement('span'); detail.textContent = `${email.to.join(', ')} · ${email.status} · ${new Date(email.created_at).toLocaleString()}`;
+    const { record, content: recordContent } = createEmailRecord(email.subject, email.to.join(', '), email.status, email.created_at, email.last_event);
+    const attempt = document.createElement('p'); attempt.textContent = `Attempt: ${email.status}. Latest recipient event: ${email.last_event || 'Not recorded'}.`;
+    recordContent.append(attempt);
     const recipients = document.createElement('details');
     const recipientsSummary = document.createElement('summary'); recipientsSummary.textContent = 'Recipients and reply address';
     const recipientsContent = document.createElement('div'); recipientsContent.className = 'delivery-events';
@@ -519,15 +572,14 @@ async function loadHistory(reset = false) {
       } catch (error) { content.textContent = `${error.message} Close and reopen to retry.`; }
       finally { delete details.dataset.loading; }
     });
-    item.append(subject, detail);
     if (email.status === 'scheduled' && email.scheduled_at) {
       const when = document.createElement('span');
       when.textContent = `Scheduled for ${new Date(email.scheduled_at).toLocaleString()} (your time zone)`;
-      item.append(when);
+      recordContent.append(when);
       if (email.preparation_retry_at) {
         const retry = document.createElement('span');
         retry.textContent = `Preparation failed ${email.preparation_attempts} time(s). Retry after ${new Date(email.preparation_retry_at).toLocaleString()} (your time zone). No send was attempted.`;
-        item.append(retry);
+        recordContent.append(retry);
       }
       const form = document.createElement('form'); form.className = 'schedule-form';
       const label = document.createElement('label'); label.htmlFor = `schedule-${email.id}`; label.textContent = `New send time for ${email.subject}`;
@@ -537,7 +589,7 @@ async function loadHistory(reset = false) {
       const save = document.createElement('button'); save.type = 'submit'; save.className = 'secondary'; save.textContent = 'Reschedule';
       const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'text-button'; cancel.textContent = 'Cancel scheduled email';
       cancel.setAttribute('aria-label', `Cancel scheduled email ${email.subject}`);
-      form.append(label, input, save, cancel); item.append(form);
+      form.append(label, input, save, cancel); recordContent.append(form);
       form.addEventListener('submit', async event => {
         event.preventDefault();
         const selected = new Date(input.value);
@@ -553,7 +605,7 @@ async function loadHistory(reset = false) {
         catch (error) { message.textContent = error.message; save.disabled = false; cancel.disabled = false; }
       });
     }
-    item.append(bodyDetails, recipients, details); list.append(item);
+    recordContent.append(bodyDetails, recipients, details); item.append(record); list.append(item);
   }
   historyCursor = result.data.at(-1)?.id || null;
   $('#empty-history').textContent = Object.keys(historyFilters).length ? 'No attempts match these filters.' : 'No email attempts yet.';
@@ -648,6 +700,7 @@ async function loadWebhooks(append = false) {
     });
     const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'text-button'; edit.textContent = 'Edit'; edit.setAttribute('aria-label', `Edit webhook ${webhook.endpoint}`);
     edit.addEventListener('click', () => {
+      $('#webhook-editor').open = true;
       editingWebhookId = webhook.id; $('#webhook-endpoint').value = webhook.endpoint;
       document.querySelectorAll('#webhook-form input[name=event]').forEach(input => { input.checked = webhook.events.includes(input.value); });
       $('#webhook-form-title').textContent = 'Edit webhook'; $('#webhook-form button[type=submit]').textContent = 'Save webhook'; $('#cancel-webhook-edit').hidden = false; $('#webhook-endpoint').focus();
@@ -714,8 +767,9 @@ async function loadInbox(reset = false) {
   if (generation !== inboxGeneration) return;
   if (reset) list.replaceChildren();
   for (const email of result.data) {
-    const item = document.createElement('li'); const title = document.createElement('strong'); title.textContent = email.subject || '(No subject)';
-    const metadata = document.createElement('span'); metadata.textContent = `${email.sender} → ${email.recipient} · ${new Date(email.created_at).toLocaleString()}`;
+    const item = document.createElement('li');
+    const { record, content: recordContent } = createEmailRecord(email.subject, email.sender, 'received', email.created_at);
+    const recipient = document.createElement('p'); recipient.textContent = `To: ${email.recipient}`; recordContent.append(recipient);
     const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Read message';
     const content = document.createElement('div'); details.append(summary, content);
     details.addEventListener('toggle', async () => {
@@ -749,7 +803,7 @@ async function loadInbox(reset = false) {
       try { await api(`/api/inbox/${encodeURIComponent(email.id)}`, { method: 'DELETE' }); await loadInbox(true); message.textContent = 'Message deleted.'; }
       catch (error) { message.textContent = error.message; remove.disabled = false; }
     });
-    item.append(title, metadata, details, remove); list.append(item);
+    recordContent.append(details, remove); item.append(record); list.append(item);
   }
   inboxCursor = result.data.at(-1)?.id || null; $('#inbox-more').hidden = !result.has_more;
   $('#empty-inbox').textContent = Object.keys(inboxFilters).length ? 'No messages match these filters.' : 'No received email. Email Routing must be configured to receive messages.';
@@ -935,7 +989,7 @@ $('#login-form').addEventListener('submit', async (event) => {
     await api('/api/auth/sign-in/email', { method: 'POST', body: JSON.stringify({ email: $('#email').value, password: $('#password').value }) });
     $('#password').value = '';
     const session = await api('/api/auth/get-session'); setSignedIn(session);
-    await loadKeys(); await loadHistory(true); await loadTemplates(); await loadInbox(true); await loadWebhooks(); await loadCloudflareStatus(); await loadSelectedCloudflareZones(); announce('Signed in.');
+    announce('Signed in.');
   } catch (error) { announce(error.message); }
 });
 $('#sign-out').addEventListener('click', async () => {
@@ -972,6 +1026,6 @@ async function showSetup() {
 }
 (async () => {
   try { await showSetup(); } catch { announce('Could not load installation setup status.'); }
-  try { if (resetToken) { showView('reset'); return; } if (resetError) { showView('forgot'); announce('This recovery link is invalid or has expired. Request a new one.'); return; } const session = await api('/api/auth/get-session'); setSignedIn(session); if (session) { await loadKeys(); await loadHistory(true); await loadTemplates(); await loadInbox(true); await loadWebhooks(); await loadCloudflareStatus(); await loadSelectedCloudflareZones(); } }
+  try { if (resetToken) { showView('reset'); return; } if (resetError) { showView('forgot'); announce('This recovery link is invalid or has expired. Request a new one.'); return; } const session = await api('/api/auth/get-session'); setSignedIn(session); }
   catch (error) { announce(error.message); }
 })();
