@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planDeliverySubscription, inspectDeliverySubscription, ensureDeliverySubscription } from '../src/cloudflare-delivery-subscription.ts';
+import { planDeliverySubscription, inspectDeliverySubscription, ensureDeliverySubscription, CloudflareQueueAccessError } from '../src/cloudflare-delivery-subscription.ts';
 
 test('delivery subscription planning reuses complete subscriptions and refuses ambiguous or incomplete ones', () => {
   const queue = 'a'.repeat(32); const zone = 'b'.repeat(32);
@@ -16,7 +16,7 @@ test('delivery subscription planning reuses complete subscriptions and refuses a
 });
 
 test('creation serializes requests and retains the lock for an uncertain result', async () => {
-  const queue = 'a'.repeat(32); const zone = 'b'.repeat(32); const account = 'c'.repeat(32); let lock = null; let created = null; let fail = false; let posts = 0;
+  const queue = 'a'.repeat(32); const zone = 'b'.repeat(32); const account = 'c'.repeat(32); let lock = null; let created = null; let fail = false; let denied = 0; let posts = 0;
   const db = { prepare(sql) { return { bind(...args) { return {
     async first() { if (!sql.startsWith('INSERT INTO delivery_subscription_locks')) throw new Error('Unexpected SQL'); if (lock) return null; lock = { target: args[0], owner: args[1] }; return { owner: lock.owner }; },
     async run() { if (lock?.target === args[0] && lock.owner === args[1]) lock = null; },
@@ -24,7 +24,7 @@ test('creation serializes requests and retains the lock for an uncertain result'
   const original = globalThis.fetch;
   globalThis.fetch = async (input, options) => {
     const url = new URL(input);
-    if (options.method === 'POST') { posts++; if (fail) throw new Error('network failure'); created = { id: 'created', ...JSON.parse(options.body) }; return Response.json({ success: true, result: created }); }
+    if (options.method === 'POST') { posts++; if (denied) return new Response(null, { status: denied }); if (fail) throw new Error('network failure'); created = { id: 'created', ...JSON.parse(options.body) }; return Response.json({ success: true, result: created }); }
     const result = url.pathname.endsWith('/queues') ? [{ queue_name: 'delivery', queue_id: queue }] : created ? [created] : [];
     return Response.json({ success: true, result, result_info: { page: 1, total_pages: 1, total_count: result.length } });
   };
@@ -33,11 +33,18 @@ test('creation serializes requests and retains the lock for an uncertain result'
     assert.equal(lock, null);
     assert.deepEqual(await ensureDeliverySubscription(db, 'secret', account, 'delivery', zone, 'mail.example.com'), { action: 'ready', id: 'created' });
     assert.equal(posts, 1);
+    created = null;
+    for (const status of [401, 403]) {
+      denied = status;
+      await assert.rejects(ensureDeliverySubscription(db, 'secret', account, 'delivery', zone, 'mail.example.com'), CloudflareQueueAccessError);
+      assert.equal(lock, null);
+    }
+    denied = 0;
     created = null; fail = true;
     await assert.rejects(ensureDeliverySubscription(db, 'secret', account, 'delivery', zone, 'mail.example.com'), /network failure/);
     assert.ok(lock);
     await assert.rejects(ensureDeliverySubscription(db, 'secret', account, 'delivery', zone, 'mail.example.com'), /already in progress/);
-    assert.equal(posts, 2);
+    assert.equal(posts, 4);
   } finally { globalThis.fetch = original; }
 });
 

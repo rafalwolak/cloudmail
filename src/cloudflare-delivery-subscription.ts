@@ -8,11 +8,16 @@ interface Subscription {
   events: string[];
 }
 
+export class CloudflareQueueAccessError extends Error {
+  constructor() { super('Cloudflare queue access is missing or expired'); }
+}
+
 async function listCloudflarePages(token: string, base: URL): Promise<unknown[]> {
   const items: unknown[] = []; let expectedTotal: number | undefined;
   for (let page = 1; page <= 20; page++) {
     const url = new URL(base); url.searchParams.set('page', String(page)); url.searchParams.set('per_page', '100');
     const response = await fetch(url, { headers: { authorization: `Bearer ${token}`, accept: 'application/json' }, redirect: 'manual', signal: AbortSignal.timeout(10000) });
+    if (response.status === 401 || response.status === 403) throw new CloudflareQueueAccessError();
     if (!response.ok) throw new Error('Cloudflare queue access failed');
     const body = await response.json() as { success?: unknown; result?: unknown; result_info?: { page?: unknown; total_pages?: unknown; total_count?: unknown } };
     const info = body.result_info;
@@ -59,6 +64,10 @@ export async function ensureDeliverySubscription(db: D1Database, token: string, 
     if (plan.action !== 'create') return plan;
     uncertain = true;
     const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/event_subscriptions/subscriptions`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(plan.request), redirect: 'manual', signal: AbortSignal.timeout(10000) });
+    if (response.status === 401 || response.status === 403) {
+      uncertain = false;
+      throw new CloudflareQueueAccessError();
+    }
     if (!response.ok) throw new Error('Cloudflare subscription creation could not be confirmed');
     const body = await response.json() as { success?: unknown; result?: unknown };
     if (body.success !== true || !body.result || typeof body.result !== 'object') throw new Error('Cloudflare subscription creation could not be confirmed');

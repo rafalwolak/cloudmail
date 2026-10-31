@@ -43,7 +43,7 @@ async function workspace(page: Page, options: { historyError?: boolean; anonymou
     else if (url.pathname.endsWith('/delivery-events')) {
       if (options.deliveryEvents === 'upstream-error') { status = 502; body = { message: 'Delivery events could not be checked. Try again.' }; }
       else if (options.deliveryEvents === 'post-access-required' && route.request().method() === 'GET') body = { action: 'missing' };
-      else { status = 403; body = { code: 'cloudflare_queue_access_required', message: 'Cloudflare queue access is missing or expired.' }; }
+      else { status = 502; body = { code: 'cloudflare_queue_access_required', message: 'Cloudflare queue access is missing or expired.' }; }
     } else if (url.pathname === '/api/cloudflare/oauth/start') body = { authorization_url: 'https://dash.cloudflare.com/oauth2/auth?client_id=local-fixture&scope=queues.write' };
     else { status = 500; body = { message: `Unexpected test request: ${url.pathname}` }; }
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
