@@ -17,12 +17,14 @@ test('delivery event inspection uses the selected account and verified domain me
   const zone = 'a'.repeat(32), account = 'b'.repeat(32), domainId = 'c'.repeat(32), queue = 'd'.repeat(32);
   const env = { DB: db, BETTER_AUTH_SECRET: secret, CLOUDFLARE_OAUTH_CLIENT_ID: 'client', DELIVERY_QUEUE_NAME: 'delivery' };
   const request = () => new Request(`https://example.com/api/cloudflare/zones/${zone}/domains/${domainId}/delivery-events`);
-  let calls = 0;
+  let calls = 0; let denyQueue = 0; let denyCreate = 0;
   globalThis.fetch = async (input, options) => {
     calls++; const url = new URL(input);
+    if (options.method === 'POST' && denyCreate) return new Response('private create diagnostic', { status: denyCreate });
     if (options.method === 'POST') return Response.json({ success: true, result: { id: 'subscription', ...JSON.parse(options.body) } });
     if (url.pathname.includes('/subdomains/')) return Response.json({ success: true, result: { name: 'mail.example.com', enabled: true } });
     assert.ok(url.pathname.startsWith(`/client/v4/accounts/${account}/`));
+    if (denyQueue) return new Response('private upstream diagnostic', { status: denyQueue });
     const result = url.pathname.endsWith('/queues') ? [{ queue_name: 'delivery', queue_id: queue }] : [];
     return Response.json({ success: true, result, result_info: { page: 1, total_pages: 1, total_count: result.length } });
   };
@@ -34,6 +36,26 @@ test('delivery event inspection uses the selected account and verified domain me
     db.sqlite.exec(await readFile(new URL('../migrations/0038_delivery_subscription_locks.sql', import.meta.url), 'utf8'));
     const created = await manageSelectedZoneDomains(new Request(request(), { method: 'POST' }), env, 'admin');
     assert.equal(created.status, 200); assert.deepEqual(await created.json(), { action: 'created', id: 'subscription' });
+    for (const upstreamStatus of [401, 403]) {
+      denyQueue = upstreamStatus;
+      for (const method of ['GET', 'POST']) {
+        const denied = await manageSelectedZoneDomains(new Request(request(), { method }), env, 'admin');
+        assert.equal(denied.status, 502); const deniedBody = await denied.json();
+        assert.equal(deniedBody.code, 'cloudflare_queue_access_required');
+        assert.equal(denied.headers.get('cache-control'), 'no-store');
+        assert.ok(!JSON.stringify(deniedBody).includes('private upstream diagnostic'));
+      }
+      denyQueue = 0; denyCreate = upstreamStatus;
+      const denied = await manageSelectedZoneDomains(new Request(request(), { method: 'POST' }), env, 'admin');
+      assert.equal(denied.status, 502); const deniedBody = await denied.json();
+      assert.equal(deniedBody.code, 'cloudflare_queue_access_required');
+      assert.ok(!JSON.stringify(deniedBody).includes('private create diagnostic'));
+      assert.equal(db.sqlite.prepare('SELECT count(*) AS count FROM delivery_subscription_locks').get().count, 0);
+      denyCreate = 0;
+    }
+    denyQueue = 500;
+    const upstreamFailure = await manageSelectedZoneDomains(request(), env, 'admin');
+    assert.equal(upstreamFailure.status, 502); assert.equal((await upstreamFailure.json()).code, undefined);
   } finally { globalThis.fetch = original; db.sqlite.close(); }
 });
 

@@ -18,7 +18,7 @@ export async function handleCloudflareOAuth(request: Request, env: { DB: D1Datab
   }
   if (url.pathname === '/api/cloudflare/oauth/start' && request.method === 'POST') {
     try {
-      const authorizationUrl = await startCloudflareAuthorization(env.DB, userId, sessionId, { clientId: env.CLOUDFLARE_OAUTH_CLIENT_ID, redirectUri, scopes: ['dns.write', 'zone.read', 'email-sending.read', 'email-sending.write'] });
+      const authorizationUrl = await startCloudflareAuthorization(env.DB, userId, sessionId, { clientId: env.CLOUDFLARE_OAUTH_CLIENT_ID, redirectUri, scopes: ['dns.write', 'zone.read', 'email-sending.read', 'email-sending.write', 'queues.write'] });
       return json({ authorization_url: authorizationUrl });
     } catch { return json({ message: 'Cloudflare authorization could not be started' }, 503); }
   }
