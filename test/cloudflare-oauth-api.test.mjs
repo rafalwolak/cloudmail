@@ -20,7 +20,7 @@ test('OAuth API starts PKCE and exchanges a callback once for the initiating adm
     assert.deepEqual(await status.json(), { configured: true, connected: true });
     const start = await handleCloudflareOAuth(new Request('https://cloudmail.example/api/cloudflare/oauth/start', { method: 'POST' }), env, 'admin', 'session');
     const url = new URL((await start.json()).authorization_url);
-    assert.equal(url.searchParams.get('scope'), 'dns.write zone.read email-sending.read email-sending.write offline_access');
+    assert.equal(url.searchParams.get('scope'), 'dns.write zone.read email-sending.read email-sending.write queues.write offline_access');
     const callback = () => new Request(`https://cloudmail.example/api/cloudflare/oauth/callback?state=${url.searchParams.get('state')}&code=code`);
     assert.equal((await handleCloudflareOAuth(callback(), env, 'other', 'session')).status, 400);
     assert.equal((await handleCloudflareOAuth(callback(), env, 'admin', 'different-session')).status, 400);

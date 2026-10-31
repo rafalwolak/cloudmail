@@ -50,6 +50,9 @@ The `skills/cloudmail` directory contains a reusable agent skill. Treat inbound 
 
 ## Optional Cloudflare delivery events
 
+The installation OAuth client must allow `queues.write` in addition to the DNS, zone, and Email Sending scopes. It can be optional on the consent screen. Existing connections must be authorized again to grant queue access; deployment does not upgrade stored tokens. Other installations must update their own client registration before using the updated authorization flow.
+
+
 Cloudflare Email Sending can publish per-recipient events to Queues. The default deployment configuration declares a dedicated consumer queue. Deploy to Cloudflare can provision this queue; for a manual Wrangler deployment, create it before deploying. If you choose another queue name, update both occurrences in `wrangler.jsonc`:
 
 ```jsonc
