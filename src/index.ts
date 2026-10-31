@@ -62,6 +62,17 @@ export default {
   },
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === '/openapi.json') {
+      const publicHeaders = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, HEAD, OPTIONS', 'access-control-allow-headers': 'If-None-Match', 'access-control-expose-headers': 'ETag', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: publicHeaders });
+      if (!['GET', 'HEAD'].includes(request.method)) return Response.json({ message: 'Method not allowed' }, { status: 405, headers: { ...publicHeaders, allow: 'GET, HEAD, OPTIONS' } });
+      const asset = await env.ASSETS.fetch(request);
+      const headers = new Headers(asset.headers);
+      for (const [name, value] of Object.entries(publicHeaders)) headers.set(name, value);
+      headers.set('content-type', 'application/json');
+      headers.set('content-security-policy', "default-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+      return new Response(request.method === 'HEAD' ? null : asset.body, { status: asset.status, headers });
+    }
     if (url.pathname === '/mcp/server-card' || url.pathname === '/.well-known/ai-catalog.json') return discovery(request, env.BETTER_AUTH_URL);
     if (url.pathname === '/api/setup' && request.method === 'GET') {
       const authentication = authenticationConfigured(env);
@@ -161,7 +172,7 @@ export default {
       headers.set('cache-control', 'no-store');
       return new Response(response.body, { status: response.status, headers });
     }
-    if (url.pathname === '/' && request.method === 'GET') return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'", 'x-content-type-options': 'nosniff' } });
+    if (url.pathname === '/' && request.method === 'GET') return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'", 'x-content-type-options': 'nosniff', 'link': '</openapi.json>; rel="service-desc"; type="application/json"' } });
     if (url.pathname !== '/mcp' && !(url.pathname === '/domains' || url.pathname.startsWith('/domains/')) && !(url.pathname === '/webhooks' || url.pathname.startsWith('/webhooks/')) && !(url.pathname === '/api-keys' || url.pathname.startsWith('/api-keys/')) && !(url.pathname === '/templates' || url.pathname.startsWith('/templates/')) && !(url.pathname === '/emails/batch' && request.method === 'POST') && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && ['GET', 'PATCH', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/receiving/') && request.method === 'DELETE')) return Response.json({ message: 'Not found' }, { status: 404 });
     const authorization = request.headers.get('Authorization') || '';
     const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
