@@ -1,6 +1,6 @@
 import { manageDomains } from './domains.ts';
 import { refreshStoredCloudflareTokens } from './cloudflare-oauth-token.ts';
-import { inspectDeliverySubscription, ensureDeliverySubscription } from './cloudflare-delivery-subscription.ts';
+import { inspectDeliverySubscription, ensureDeliverySubscription, CloudflareQueueAccessError } from './cloudflare-delivery-subscription.ts';
 
 export async function manageSelectedZoneDomains(request: Request, env: { DB: D1Database; BETTER_AUTH_SECRET: string; CLOUDFLARE_OAUTH_CLIENT_ID?: string; DELIVERY_QUEUE_NAME?: string }, userId: string): Promise<Response> {
   const url = new URL(request.url);
@@ -27,7 +27,10 @@ export async function manageSelectedZoneDomains(request: Request, env: { DB: D1D
       if (request.method === 'POST') return json(await ensureDeliverySubscription(env.DB, accessToken, zone.account_id, env.DELIVERY_QUEUE_NAME!, zoneId, domain.name));
       const result = await inspectDeliverySubscription(accessToken, zone.account_id, env.DELIVERY_QUEUE_NAME!, zoneId, domain.name);
       return json(result.action === 'create' ? { action: 'missing' } : result);
-    } catch { return json({ message: 'Delivery event configuration could not be confirmed. Check Cloudflare queue permissions and existing subscriptions before retrying.' }, 502); }
+    } catch (error) {
+      if (error instanceof CloudflareQueueAccessError) return json({ code: 'cloudflare_queue_access_required', message: 'Cloudflare queue access is missing or expired. Enable queue access for this installation’s OAuth client, then reconnect Cloudflare.' }, 403);
+      return json({ message: 'Delivery event configuration could not be confirmed. Check Cloudflare queue permissions and existing subscriptions before retrying.' }, 502);
+    }
   }
   url.pathname = `/domains${match[2] ? `/${match[2].toLowerCase()}${match[3]?.toLowerCase() ?? ''}` : ''}`;
   return manageDomains(new Request(url, request), { zoneId, accessToken });

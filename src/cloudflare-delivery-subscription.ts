@@ -8,11 +8,16 @@ interface Subscription {
   events: string[];
 }
 
+export class CloudflareQueueAccessError extends Error {
+  constructor() { super('Cloudflare queue access is missing or expired'); }
+}
+
 async function listCloudflarePages(token: string, base: URL): Promise<unknown[]> {
   const items: unknown[] = []; let expectedTotal: number | undefined;
   for (let page = 1; page <= 20; page++) {
     const url = new URL(base); url.searchParams.set('page', String(page)); url.searchParams.set('per_page', '100');
     const response = await fetch(url, { headers: { authorization: `Bearer ${token}`, accept: 'application/json' }, redirect: 'manual', signal: AbortSignal.timeout(10000) });
+    if (response.status === 401 || response.status === 403) throw new CloudflareQueueAccessError();
     if (!response.ok) throw new Error('Cloudflare queue access failed');
     const body = await response.json() as { success?: unknown; result?: unknown; result_info?: { page?: unknown; total_pages?: unknown; total_count?: unknown } };
     const info = body.result_info;

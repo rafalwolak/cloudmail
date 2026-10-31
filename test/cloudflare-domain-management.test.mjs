@@ -17,12 +17,13 @@ test('delivery event inspection uses the selected account and verified domain me
   const zone = 'a'.repeat(32), account = 'b'.repeat(32), domainId = 'c'.repeat(32), queue = 'd'.repeat(32);
   const env = { DB: db, BETTER_AUTH_SECRET: secret, CLOUDFLARE_OAUTH_CLIENT_ID: 'client', DELIVERY_QUEUE_NAME: 'delivery' };
   const request = () => new Request(`https://example.com/api/cloudflare/zones/${zone}/domains/${domainId}/delivery-events`);
-  let calls = 0;
+  let calls = 0; let denyQueue = false;
   globalThis.fetch = async (input, options) => {
     calls++; const url = new URL(input);
     if (options.method === 'POST') return Response.json({ success: true, result: { id: 'subscription', ...JSON.parse(options.body) } });
     if (url.pathname.includes('/subdomains/')) return Response.json({ success: true, result: { name: 'mail.example.com', enabled: true } });
     assert.ok(url.pathname.startsWith(`/client/v4/accounts/${account}/`));
+    if (denyQueue) return new Response('private upstream diagnostic', { status: 403 });
     const result = url.pathname.endsWith('/queues') ? [{ queue_name: 'delivery', queue_id: queue }] : [];
     return Response.json({ success: true, result, result_info: { page: 1, total_pages: 1, total_count: result.length } });
   };
@@ -34,6 +35,11 @@ test('delivery event inspection uses the selected account and verified domain me
     db.sqlite.exec(await readFile(new URL('../migrations/0038_delivery_subscription_locks.sql', import.meta.url), 'utf8'));
     const created = await manageSelectedZoneDomains(new Request(request(), { method: 'POST' }), env, 'admin');
     assert.equal(created.status, 200); assert.deepEqual(await created.json(), { action: 'created', id: 'subscription' });
+    denyQueue = true;
+    const denied = await manageSelectedZoneDomains(request(), env, 'admin');
+    assert.equal(denied.status, 403); const deniedBody = await denied.json();
+    assert.equal(deniedBody.code, 'cloudflare_queue_access_required');
+    assert.ok(!JSON.stringify(deniedBody).includes('private upstream diagnostic'));
   } finally { globalThis.fetch = original; db.sqlite.close(); }
 });
 
