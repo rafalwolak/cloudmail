@@ -17,7 +17,7 @@ Review correctness, authorization, confidentiality, compatibility, and data inte
 
 ## Validation and evidence
 
-Run `npm run check`, then `npm test` against the intended disposable local Worker with local D1 migrations applied. Report commands, environment, failures, and skips. See `SDLC.md` for the setup-time failing baseline. No lint/build script, CI workflow, or Playwright E2E suite exists at setup time. Never treat deployment as validation or claim missing checks passed.
+Run `npm run check`, then `npm test` against the intended disposable local Worker with local D1 migrations applied. Report commands, environment, failures, and skips. See `SDLC.md` for the setup-time failing baseline. GitHub Actions runs these commands for PRs to `main` through `.github/workflows/ci.yml`, using local migrations and a local Worker. No lint/build script or Playwright E2E suite exists. Never treat deployment as validation or claim missing checks passed.
 
 ## Findings and gates
 
