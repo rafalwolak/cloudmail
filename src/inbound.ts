@@ -1,8 +1,9 @@
 import PostalMime from 'postal-mime';
+import { createReceivedRawDownload, type ReceivedRawEnv } from './received-raw.ts';
 import { attachmentForAgent } from './agent-attachment.ts';
 import { attachmentList } from './attachment-list.ts';
 
-export interface InboundEnv { DB: D1Database; INBOUND: R2Bucket; INBOUND_ENABLED?: string; INBOUND_ADDRESSES?: string; INBOUND_ALLOW_PLUS_ADDRESSES?: string }
+export interface InboundEnv extends ReceivedRawEnv { INBOUND_ENABLED?: string; INBOUND_ADDRESSES?: string; INBOUND_ALLOW_PLUS_ADDRESSES?: string }
 interface InboundRow { id: string; sender: string; recipient: string; subject: string; created_at: string; object_key: string }
 const response = (value: unknown, status = 200) => Response.json(value, { status, headers: { 'cache-control': 'no-store' } });
 
@@ -82,7 +83,7 @@ export async function readReceived(request: Request, env: InboundEnv): Promise<R
   }
   const attachments = parsed.attachments.map((attachment, index) => ({ id: String(index), filename: attachment.filename, content_type: attachment.mimeType, content_id: attachment.contentId ?? null, content_disposition: attachment.disposition, size: bytes(attachment.content).byteLength }));
   if (match[2]) return attachmentList(attachments, url.searchParams);
-  return response({ id: row.id, from: row.sender, to: row.recipient, header_from: parsed.from ?? null, header_to: parsed.to ?? [], cc: parsed.cc ?? [], bcc: parsed.bcc ?? [], reply_to: parsed.replyTo ?? [], subject: parsed.subject ?? row.subject, created_at: row.created_at, text: parsed.text ?? null, html: parsed.html ?? null, message_id: parsed.messageId ?? null, in_reply_to: parsed.inReplyTo ?? null, references: parsed.references ?? null, attachments });
+  return response({ id: row.id, raw: await createReceivedRawDownload(row.id, env), from: row.sender, to: row.recipient, header_from: parsed.from ?? null, header_to: parsed.to ?? [], cc: parsed.cc ?? [], bcc: parsed.bcc ?? [], reply_to: parsed.replyTo ?? [], subject: parsed.subject ?? row.subject, created_at: row.created_at, text: parsed.text ?? null, html: parsed.html ?? null, message_id: parsed.messageId ?? null, in_reply_to: parsed.inReplyTo ?? null, references: parsed.references ?? null, attachments });
 }
 
 export async function readReceivedAttachmentForAgent(id: string, index: number, env: InboundEnv) {

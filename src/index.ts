@@ -1,3 +1,4 @@
+import { downloadReceivedRaw } from './received-raw';
 import { previewTemplate, previewToken } from './template-preview';
 import { discovery } from './discovery';
 import { checkSelectedDomainDns } from './cloudflare-dns-diagnostics';
@@ -62,6 +63,7 @@ export default {
   },
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname.startsWith('/downloads/receiving/')) return downloadReceivedRaw(request, env);
     if (url.pathname === '/openapi.json') {
       const publicHeaders = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, HEAD, OPTIONS', 'access-control-allow-headers': 'If-None-Match', 'access-control-expose-headers': 'ETag', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: publicHeaders });
