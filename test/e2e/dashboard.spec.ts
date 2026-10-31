@@ -52,6 +52,7 @@ async function workspace(page: Page, options: { historyError?: boolean; anonymou
 }
 
 async function navigate(page: Page, label: string) {
+  await expect(page.locator('#dashboard-view')).toBeVisible();
   const toggle = page.getByRole('button', { name: 'Menu', exact: true });
   if (await toggle.isVisible()) await toggle.click();
   await page.getByRole('navigation', { name: 'Dashboard navigation' }).getByRole('link', { name: label, exact: true }).click();
@@ -624,4 +625,127 @@ test('reply cannot replace a composer while its send is still in flight', async 
   await page.getByRole('button', { name: 'Reply', exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard\/compose$/);
   await expect(page.locator('#compose-subject')).toHaveValue('Re: Invoice question');
+});
+
+const rawMime = 'From: sender@example.com\r\nMIME-Version: 1.0\r\n\r\nSynthetic original MIME\r\n';
+async function originalDownloadWorkspace(page: Page) {
+  await replyWorkspace(page);
+  let reads = 0;
+  await page.route('**/api/inbox/received-1', async route => {
+    reads++;
+    const url = new URL('/downloads/receiving/received-1/raw', route.request().url());
+    url.searchParams.set('signature', reads === 1 ? 'expired-fixture' : 'fresh-fixture');
+    url.searchParams.set('expires', reads === 1 ? '1' : String(Math.floor(Date.now() / 1000) + 300));
+    await route.fulfill({ json: { ...incoming, raw: { download_url: url.href, expires_at: new Date(reads === 1 ? 1000 : Date.now() + 300000).toISOString() } } });
+  });
+  await page.goto('/dashboard'); await openReplyAction(page);
+  return () => reads;
+}
+
+test('inbox downloads fresh original MIME by keyboard without exposing its capability URL', async ({ page }, testInfo) => {
+  const reads = await originalDownloadWorkspace(page);
+  let requests = 0;
+  await page.route('**/downloads/receiving/received-1/raw?**', async route => {
+    requests++; expect(new URL(route.request().url()).searchParams.get('signature')).toBe('fresh-fixture');
+    expect(route.request().headers().authorization).toBeUndefined(); expect(route.request().headers().referer).toBeUndefined();
+    await route.fulfill({ contentType: 'application/octet-stream', body: rawMime });
+  });
+  const button = page.getByRole('button', { name: 'Download .eml', exact: true });
+  await expect(button).toBeVisible(); await page.getByRole('button', { name: 'Reply', exact: true }).focus(); await page.keyboard.press('Tab'); await expect(button).toBeFocused(); await noOverflow(page);
+  await capture(page, testInfo.outputPath('inbox-original-ready.png'));
+  const pending = page.waitForEvent('download'); await page.keyboard.press('Enter');
+  const download = await pending; expect(download.suggestedFilename()).toBe('received-1.eml');
+  const fs = await import('node:fs/promises'); const crypto = await import('node:crypto');
+  const bytes = await fs.readFile((await download.path())!);
+  expect(crypto.createHash('sha256').update(bytes).digest('hex')).toBe(crypto.createHash('sha256').update(rawMime).digest('hex'));
+  await download.delete();
+  expect(reads()).toBe(2); expect(requests).toBe(1);
+  await expect(page).toHaveURL(/\/dashboard\/inbox$/); await expect(button).toBeEnabled();
+  await expect(page.getByText('Download started. Check your browser downloads.', { exact: true })).toBeVisible();
+  await expect(page.locator('a[href*="signature="]')).toHaveCount(0);
+});
+
+test('original MIME download exposes loading and recoverable failure without losing the message', async ({ page }, testInfo) => {
+  const reads = await originalDownloadWorkspace(page);
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; }); let calls = 0;
+  await page.route('**/downloads/receiving/received-1/raw?**', async route => {
+    if (++calls === 1) { await gate; await route.fulfill({ status: 503, json: { message: 'Storage unavailable' } }); }
+    else await route.fulfill({ contentType: 'application/octet-stream', body: rawMime });
+  });
+  await page.getByRole('button', { name: 'Download .eml', exact: true }).click();
+  const loading = page.getByRole('button', { name: 'Downloading…', exact: true });
+  await expect(loading).toBeDisabled(); await noOverflow(page); await capture(page, testInfo.outputPath('inbox-original-loading.png'));
+  release();
+  const retry = page.getByRole('button', { name: 'Download .eml', exact: true });
+  await expect(page.getByText('Could not download original message. Try again.', { exact: true })).toBeVisible(); await expect(retry).toBeEnabled();
+  await expect(page.getByText(incoming.text, { exact: true })).toBeVisible(); await noOverflow(page);
+  await capture(page, testInfo.outputPath('inbox-original-error.png'));
+  const pending = page.waitForEvent('download'); await retry.click(); const download = await pending; await download.delete();
+  expect(reads()).toBe(3); expect(calls).toBe(2);
+});
+
+test('original MIME download handles missing configuration and refuses foreign URLs', async ({ page }) => {
+  await originalDownloadWorkspace(page); let raw: unknown = null; let foreignRequests = 0;
+  await page.route('**/api/inbox/received-1', route => route.fulfill({ json: { ...incoming, raw } }));
+  await page.route('https://other.example.net/**', async route => { foreignRequests++; await route.abort(); });
+  const button = page.getByRole('button', { name: 'Download .eml', exact: true });
+  await button.click();
+  await expect(page.getByText('Original download is unavailable for this installation.', { exact: true })).toBeVisible(); await expect(button).toBeEnabled();
+  raw = { download_url: 'https://other.example.net/download', expires_at: new Date(Date.now() + 300000).toISOString() };
+  await button.click();
+  await expect(page.getByText('Could not download original message. Try again.', { exact: true })).toBeVisible(); await expect(button).toBeEnabled();
+  expect(foreignRequests).toBe(0); await expect(page.getByText(incoming.text, { exact: true })).toBeVisible();
+});
+
+for (const destination of ['navigation', 'sign-out']) test(`leaving the inbox by ${destination} cancels a pending original download`, async ({ page }) => {
+  await originalDownloadWorkspace(page);
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+  let started!: () => void; const requested = new Promise<void>(resolve => { started = resolve; }); let downloads = 0;
+  page.on('download', () => { downloads++; });
+  await page.route('**/downloads/receiving/received-1/raw?**', async route => { started(); await gate; await route.fulfill({ contentType: 'application/octet-stream', body: rawMime }).catch(() => {}); });
+  await page.getByRole('button', { name: 'Download .eml', exact: true }).click(); await requested;
+  const canceled = page.waitForEvent('requestfailed', request => new URL(request.url()).pathname.startsWith('/downloads/receiving/'));
+  if (destination === 'navigation') await navigate(page, 'Sent emails');
+  else {
+    const menu = page.getByRole('button', { name: 'Menu', exact: true }); if (await menu.isVisible()) await menu.click();
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  }
+  await canceled; release();
+  if (destination === 'navigation') await expect(page.getByRole('heading', { name: 'Sent emails', exact: true })).toBeVisible();
+  else await expect(page.locator('#login-view')).toBeVisible();
+  expect(downloads).toBe(0);
+});
+
+test('a failed inbox refresh leaves canceled original downloads with an accurate status', async ({ page }) => {
+  await originalDownloadWorkspace(page);
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+  let started!: () => void; const requested = new Promise<void>(resolve => { started = resolve; });
+  await page.route('**/downloads/receiving/received-1/raw?**', async route => { started(); await gate; await route.fulfill({ contentType: 'application/octet-stream', body: rawMime }).catch(() => {}); });
+  await page.getByRole('button', { name: 'Download .eml', exact: true }).click(); await requested;
+  await page.route('**/api/inbox?**', route => route.fulfill({ status: 503, json: { message: 'Inbox unavailable. Retry.' } }));
+  const canceled = page.waitForEvent('requestfailed', request => new URL(request.url()).pathname.startsWith('/downloads/receiving/'));
+  const filters = page.locator('#inbox-filter').locator('..');
+  await filters.locator('summary').click();
+  await page.locator('#inbox-clear').click(); await canceled; release();
+  await expect(page.locator('#inbox-status')).toContainText('Inbox unavailable. Retry.');
+  await expect(page.getByText('Download canceled.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download .eml', exact: true })).toBeEnabled();
+  await expect(page.getByText('Downloading original message…', { exact: true })).toHaveCount(0);
+});
+
+test('responsive navigation waits for delayed session bootstrap before checking the menu', async ({ page }) => {
+  await workspace(page);
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+  let started!: () => void; const requested = new Promise<void>(resolve => { started = resolve; });
+  await page.route('**/api/auth/get-session', async route => {
+    started(); await gate;
+    await route.fulfill({ json: { user: { email: 'admin@example.com', emailVerified: true } } });
+  });
+  await page.goto('/dashboard'); await requested;
+  const navigating = navigate(page, 'Inbox');
+  await expect(page.locator('#dashboard-view')).toBeHidden();
+  // Observe the pre-bootstrap menu before releasing the session, matching the CI race.
+  expect(await page.getByRole('button', { name: 'Menu', exact: true }).isVisible()).toBe(false);
+  release(); await navigating;
+  await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
 });

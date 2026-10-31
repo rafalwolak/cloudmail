@@ -89,7 +89,7 @@ summary { cursor: pointer; min-height: 40px; padding: 8px 0; color: var(--ink); 
 .metrics-grid dd { margin: 8px 0 0; font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
 #compose-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
 #compose-fields > button { margin-top: 24px; }
-.template-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.template-actions, .inbox-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .schedule-form { margin: 0 0 12px; }
 .schedule-form input { max-width: 352px; }
 .schedule-form > button { margin: 8px 8px 0 0; }
