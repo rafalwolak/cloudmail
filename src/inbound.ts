@@ -17,7 +17,19 @@ export async function receiveEmail(message: ForwardableEmailMessage, env: Inboun
   if (env.INBOUND_ENABLED !== 'true' || !accepted) { message.setReject('Recipient is not configured'); return; }
   if (message.rawSize > 25 * 1024 * 1024) { message.setReject('Message exceeds size limit'); return; }
   const id = crypto.randomUUID(); const objectKey = `inbound/${id}`;
-  await env.INBOUND.put(objectKey, message.raw);
+  // R2 needs a known stream length; preserve streaming without buffering the MIME body.
+  const stream = new FixedLengthStream(message.rawSize);
+  const abort = new AbortController();
+  const pumping = message.raw.pipeTo(stream.writable, { signal: abort.signal });
+  try {
+    await Promise.all([pumping, env.INBOUND.put(objectKey, stream.readable)]);
+  } catch (error) {
+    abort.abort();
+    await stream.readable.cancel().catch(() => {});
+    await pumping.catch(() => {});
+    await message.raw.cancel().catch(() => {});
+    throw error;
+  }
   // A failed D1 response can follow a successful commit. Keep the object so a
   // committed metadata row never points to content deleted on an uncertain result.
   await env.DB.prepare('INSERT INTO inbound_emails (id, sender, recipient, subject, created_at, object_key, message_id) VALUES (?, ?, ?, ?, ?, ?, ?)')

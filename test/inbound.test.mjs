@@ -1,6 +1,18 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { receiveEmail, readReceived, readReceivedAttachmentForAgent, deleteReceived } from '../src/inbound.ts';
+// Node has no Workers FixedLengthStream. The native R2 behavior is covered by inbound-http.test.mjs.
+const originalFixedLengthStream = globalThis.FixedLengthStream;
+if (!originalFixedLengthStream) globalThis.FixedLengthStream = class extends TransformStream {
+  constructor(expected) {
+    let size = 0;
+    super({
+      transform(chunk, controller) { size += chunk.byteLength; if (size > expected) throw new Error('Fixed stream length exceeded'); controller.enqueue(chunk); },
+      flush() { if (size !== expected) throw new Error('Fixed stream length mismatch'); },
+    });
+  }
+};
+after(() => { if (!originalFixedLengthStream) delete globalThis.FixedLengthStream; });
 const raw = 'From: sender@example.com\r\nTo: inbox@example.com\r\nSubject: Hello\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello inbox';
 function fixture() {
   const objects = new Map(); const rows = new Map();
@@ -142,4 +154,29 @@ test('deletes both stored message and metadata, and preserves metadata if R2 fai
   const deleted = await deleteReceived(id, context.env);
   assert.equal(deleted.status, 200); assert.equal(context.rows.size, 0); assert.equal(context.objects.size, 0);
   assert.equal((await deleteReceived(id, context.env)).status, 404);
+});
+
+
+test('inbound streaming preserves UTF-8 MIME bytes exactly', async () => {
+  const context = fixture(); const content = `${raw}\r\nHello \u{1F680}`; const bytes = new TextEncoder().encode(content);
+  context.message.raw = new Blob([bytes]).stream(); context.message.rawSize = bytes.byteLength;
+  await receiveEmail(context.message, context.env);
+  assert.equal(Buffer.compare(Buffer.from([...context.objects.values()][0]), Buffer.from(bytes)), 0);
+});
+
+test('incorrect inbound byte counts fail without storing metadata', { timeout: 3000 }, async () => {
+  for (const offset of [-1, 1]) {
+    const context = fixture(); context.message.rawSize += offset;
+    await assert.rejects(() => receiveEmail(context.message, context.env));
+    assert.equal(context.rows.size, 0); assert.equal(context.objects.size, 0);
+  }
+});
+
+test('a failed R2 upload cancels the source and never inserts inbound metadata', { timeout: 3000 }, async () => {
+  const context = fixture(); let canceled = false;
+  context.message.raw = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array([1, 2, 3])); }, cancel() { canceled = true; } });
+  context.message.rawSize = 3;
+  context.env.INBOUND.put = async () => { throw new Error('Synthetic R2 failure'); };
+  await assert.rejects(() => receiveEmail(context.message, context.env), /Synthetic R2 failure/);
+  assert.equal(canceled, true); assert.equal(context.rows.size, 0);
 });
