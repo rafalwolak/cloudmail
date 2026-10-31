@@ -114,13 +114,13 @@ This contract describes the implemented dashboard and the authentication views s
 
 ## Colors
 
-The palette is charcoal and near-white; blue is reserved for interaction focus and state-specific colors carry operational meaning. Frontmatter values are normative and follow the current stylesheet.
+The palette is charcoal and near-white; blue marks interaction focus and the selected chart data series; state-specific colors carry operational meaning. Frontmatter values are normative and follow the current stylesheet.
 
 ### Primary
 
 - **Near-white action ink** (`ink`): primary action fills, headings and active text.
 - **Pale neutral accent** (`accent`): links.
-- **Focus blue** (`focus`): keyboard focus outlines and text carets.
+- **Focus blue** (`focus`): keyboard focus outlines, text carets and the selected chart data series.
 
 ### Neutral
 
@@ -181,7 +181,11 @@ Links have a minimum height of (42px), a (12px) icon/text gap and (18px) outline
 
 ### Containers and Disclosures
 
-Filter panels use the low surface, a thin divider border and panel corners. Editor disclosures use an outlined container with horizontal padding (20px). Metrics share one bordered, clipped container; each metric sits on the low surface with padding (20px), reduced to (16px) on mobile. Avoid treating these containers as promotional cards.
+Filter panels use the low surface, a thin divider border and panel corners. Editor disclosures use an outlined container with horizontal padding (20px). Metrics share one bordered, clipped container with flexible columns of at least (140px); each metric sits on the low surface with padding (20px), reduced to (16px) on mobile. The mobile grid retains two columns. Avoid treating these containers as promotional cards.
+
+### Data Charts and Tables
+
+Time-series charts use a single focus-blue line against divider-colored gridlines. A labeled selector changes the displayed series; a text summary and a disclosed table provide exact values. Tables use divider-separated rows, a low-surface header and tabular numerals. Their labeled scroll region supports keyboard access and a maximum height of (480px).
 
 ### Email Records and Status Labels
 

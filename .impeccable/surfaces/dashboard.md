@@ -19,3 +19,11 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 ## State coverage
 
 Verify authenticated and anonymous states, direct URLs, active navigation, browser history, loading, empty lists, request failures, long addresses, mobile menu keyboard control and reduced motion. Local browser fixtures contain synthetic data only. Production Resend inspection is read-only; private records are not copied into repository artifacts.
+
+## Metrics timeline extension
+
+Use the existing period dimension for a daily activity chart, a native metric selector and an exact-value table. Keep the approved dashboard tokens and layout. Show accepted-message counts separately from recipient-event counts; do not infer rates or delivery failures from missing observations. Display UTC days including the partial current day. Daily recipient counts are deduplicated per bucket and need not sum to interval totals. Clear the timeline on loading, error and sign-out. Test nonzero, empty, failed and long-period data at all supported browser widths.
+
+## Transactional tags extension
+
+Keep metadata optional in a native Tags disclosure in the existing composer. Add labelled name/value pairs, focus new rows, and move focus to an adjacent row or Add tag after removal. Preserve the API limit of 100 tags and the 1-256 ASCII letters/digits/underscore/hyphen rule. Invalid collapsed fields open before browser validation focuses them. Include tags in the existing confirmed send/template/schedule snapshot and idempotency lifecycle. Display retained tags as text in Message content, including an explicit empty state. Preserve current dashboard tokens, responsive layout, authorization and sending semantics.

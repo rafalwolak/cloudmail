@@ -5,8 +5,9 @@ const email = { id: emailId, subject: 'Receipt <script>untrusted</script>', from
 
 // Exercise real assets and routing with synthetic administrator responses.
 // Authorization itself is covered by the Worker integration tests.
-async function workspace(page: Page, options: { historyError?: boolean; anonymous?: boolean; existingWebhook?: boolean; deliveryEvents?: 'access-required' | 'post-access-required' | 'upstream-error' } = {}) {
+async function workspace(page: Page, options: { historyError?: boolean; anonymous?: boolean; existingWebhook?: boolean; metrics?: 'empty' | 'error'; deliveryEvents?: 'access-required' | 'post-access-required' | 'upstream-error' } = {}) {
   const requests: string[] = [];
+  let signedIn = !options.anonymous;
   let webhook = { id: 'hook-1', endpoint: 'https://example.com/events', status: 'enabled', events: ['email.delivered'] };
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
@@ -14,12 +15,23 @@ async function workspace(page: Page, options: { historyError?: boolean; anonymou
     let body: unknown;
     let status = 200;
     if (url.pathname === '/api/setup') body = { authentication_configured: true, authentication_origin_matches: true, sender_configured: true, administrator_configured: true, registration_enabled: false };
-    else if (url.pathname === '/api/auth/get-session') body = options.anonymous ? null : { user: { email: 'admin@example.com', emailVerified: true } };
+    else if (url.pathname === '/api/auth/sign-in/email') { signedIn = true; body = {}; }
+    else if (url.pathname === '/api/auth/sign-out') { signedIn = false; body = {}; }
+    else if (url.pathname === '/api/auth/get-session') body = !signedIn ? null : { user: { email: 'admin@example.com', emailVerified: true } };
     else if (url.pathname === '/api/history') {
       status = options.historyError ? 503 : 200;
       body = options.historyError ? { message: 'History is temporarily unavailable. Try again.' } : { data: [{ ...email, id: 'receipt-2', subject: 'Your order is confirmed', to: ['alex@example.com', 'second@example.com'] }, { ...email, id: 'receipt-3', subject: 'Your invoice is ready', last_event: 'deferred', to: ['finance@example.com'] }, email, { ...email, id: 'scheduled-1', subject: 'Service appointment reminder', status: 'scheduled', last_event: null, scheduled_at: '2026-11-01T12:00:00Z' }], has_more: false };
     } else if (url.pathname === `/api/history/${emailId}`) body = { ...email, cc: [], bcc: [], reply_to: null, text: 'Synthetic receipt content', html: null, attachments: [] };
-    else if (url.pathname === '/api/history/metrics') body = { start_date: '2026-10-23T00:00:00Z', end_date: '2026-10-30T00:00:00Z', totals: { sent: 1, delivered: 1, deferred: 0, bounced: 0, failed: 0, rejected: 0, complained: 0 } };
+    else if (url.pathname === '/api/history/metrics') {
+      if (options.metrics === 'error') { status = 503; body = { message: 'Metrics unavailable. Retry.' }; }
+      else {
+        const start = url.searchParams.get('start_date') || '2026-10-23T00:00:00Z';
+        const end = url.searchParams.get('end_date') || '2026-10-30T00:00:00Z';
+        const first = new Date(start); first.setUTCHours(0, 0, 0, 0);
+        const empty = options.metrics === 'empty';
+        body = { start_date: start, end_date: end, totals: { sent: empty ? 0 : 3, delivered: empty ? 0 : 2, deferred: 0, bounced: 0, failed: 0, rejected: 0, complained: 0 }, data: empty ? [] : [{ period: first.toISOString(), sent: 1, delivered: 2 }, { period: new Date(first.getTime() + 86400000).toISOString(), sent: 2, delivered: 0 }] };
+      }
+    }
     else if (url.pathname === '/api/keys') body = { data: [], has_more: false };
     else if (url.pathname === '/api/templates') body = { data: [], has_more: false };
     else if (url.pathname === '/api/webhooks') body = { data: options.existingWebhook ? [webhook] : [], has_more: false };
@@ -285,4 +297,198 @@ test('zone discovery can retry a failure and continue through multiple pages', a
   await more.click();
   await expect(page.locator('#cloudflare-zone option')).toHaveCount(3);
   await expect(more).toBeHidden();
+});
+
+
+test('metrics show daily activity, switch series without a request and expose exact values', async ({ page }, testInfo) => {
+  const requests = await workspace(page);
+  await page.goto('/dashboard/metrics');
+  await expect(page.locator('#metrics-results')).toContainText('Accepted messages');
+  const timeline = page.getByRole('region', { name: 'Activity over time', exact: true });
+  await expect(timeline).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Accepted messages by UTC day', exact: true })).toBeVisible();
+  const initialRequests = requests.filter(path => path === '/api/history/metrics').length;
+  await page.getByLabel('Metric', { exact: true }).selectOption('delivered');
+  await expect(page.getByRole('img', { name: 'Delivered recipients by UTC day', exact: true })).toBeVisible();
+  expect(requests.filter(path => path === '/api/history/metrics')).toHaveLength(initialRequests);
+  await page.getByText('View daily data', { exact: true }).click();
+  await expect(page.locator('#metrics-daily-rows tr')).toHaveCount(7);
+  await expect(page.locator('#metrics-daily-rows tr').first()).toContainText('2');
+  await expect(page.getByText('Daily counts need not sum to interval totals.', { exact: false })).toBeVisible();
+  await noOverflow(page);
+  await capture(page, testInfo.outputPath('metrics.png'));
+  await page.getByLabel('Period', { exact: true }).selectOption('90');
+  await page.getByRole('button', { name: 'Load overview', exact: true }).click();
+  await expect(page.locator('#metrics-daily-rows tr')).toHaveCount(90);
+  const dailyValues = page.getByRole('region', { name: 'Daily metric values', exact: true });
+  await dailyValues.focus(); await page.keyboard.press('End');
+  await expect.poll(() => dailyValues.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  await noOverflow(page);
+});
+
+test('metrics distinguish no observations from an unavailable report', async ({ page }) => {
+  await workspace(page, { metrics: 'empty' });
+  await page.goto('/dashboard/metrics');
+  await expect(page.locator('#metrics-trend-summary')).toHaveText('No accepted messages recorded in this interval.');
+  await page.getByText('View daily data', { exact: true }).click();
+  await expect(page.locator('#metrics-daily-rows tr')).toHaveCount(7);
+  await expect(page.locator('#metrics-daily-rows td:last-child')).toHaveText(Array(7).fill('0'));
+  await page.route('**/api/history/metrics?*', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Metrics unavailable. Retry.' }) }));
+  await page.getByRole('button', { name: 'Load overview', exact: true }).click();
+  await expect(page.locator('#metrics-status')).toHaveText('Metrics unavailable. Retry.');
+  await expect(page.locator('#metrics-trend')).toBeHidden();
+  await expect(page.locator('#metrics-results')).toBeEmpty();
+  await expect(page.getByRole('button', { name: 'Load overview', exact: true })).toBeEnabled();
+});
+
+
+test('signing out clears loaded metric values and chart data', async ({ page }) => {
+  await workspace(page);
+  await page.goto('/dashboard/metrics');
+  await expect(page.locator('#metrics-trend')).toBeVisible();
+  const menu = page.getByRole('button', { name: 'Menu', exact: true });
+  if (await menu.isVisible()) await menu.click();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+  await expect(page.locator('#metrics-results')).toBeEmpty();
+  await expect(page.locator('#metrics-daily-rows')).toBeEmpty();
+  await expect(page.locator('#metrics-trend-summary')).toBeEmpty();
+  await expect(page.locator('#metrics-dates')).toBeEmpty();
+  await expect(page.locator('#metrics-line')).not.toHaveAttribute('points');
+});
+
+
+test('the module-based dashboard signs in and restores a direct metrics URL', async ({ page }) => {
+  await workspace(page, { anonymous: true });
+  await page.goto('/dashboard/metrics');
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+  const form = page.locator('#login-form');
+  await form.getByLabel('Email address', { exact: true }).fill('admin@example.com');
+  await form.getByLabel('Password', { exact: true }).fill('synthetic-password');
+  await form.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Metrics', exact: true })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Accepted messages by UTC day', exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard\/metrics$/);
+});
+
+async function composeReceipt(page: Page) {
+  await page.goto('/dashboard/compose');
+  await page.getByLabel('From', { exact: true }).fill('billing@example.com');
+  await page.getByLabel('To', { exact: true }).fill('customer@example.com');
+  await page.locator('#compose-form').getByLabel('Subject', { exact: true }).fill('Synthetic receipt');
+  await page.getByLabel('Plain text', { exact: true }).fill('Thank you for your order.');
+  await page.getByText('Tags (optional)', { exact: true }).click();
+  await page.getByRole('button', { name: 'Add tag', exact: true }).click();
+  await expect(page.getByLabel('Tag name 1', { exact: true })).toBeFocused();
+  await page.getByLabel('Tag name 1', { exact: true }).fill('category');
+  await page.getByLabel('Tag value 1', { exact: true }).fill('receipt');
+}
+
+test('composer retains tags and idempotency key on retry and resets after acceptance', async ({ page }, testInfo) => {
+  await workspace(page);
+  const payloads: { tags?: { name: string; value: string }[] }[] = [];
+  const keys: string[] = [];
+  await page.route('**/api/send', async route => {
+    payloads.push(route.request().postDataJSON()); keys.push(route.request().headers()['idempotency-key']);
+    await route.fulfill({ status: payloads.length === 1 ? 503 : 200, json: payloads.length === 1 ? { message: 'Sending unavailable.' } : { id: emailId } });
+  });
+  page.on('dialog', dialog => dialog.accept());
+  await composeReceipt(page);
+  await page.getByRole('button', { name: 'Add tag', exact: true }).click();
+  await page.getByLabel('Tag name 2', { exact: true }).fill('order_id');
+  await page.getByLabel('Tag value 2', { exact: true }).fill('ORDER-123');
+  await noOverflow(page);
+  await capture(page, testInfo.outputPath('compose-tags.png'));
+  const send = page.locator('#compose-form').getByRole('button', { name: 'Send email', exact: true });
+  await send.click();
+  await expect(page.locator('#compose-status')).toContainText('Check history before trying again');
+  await expect(page.getByLabel('Tag value 2', { exact: true })).toHaveValue('ORDER-123');
+  await send.click();
+  await expect(page.locator('#compose-status')).toContainText('Accepted by Cloudflare');
+  expect(payloads[0].tags).toEqual([{ name: 'category', value: 'receipt' }, { name: 'order_id', value: 'ORDER-123' }]);
+  expect(payloads[1]).toEqual(payloads[0]); expect(keys[0]).toBeTruthy(); expect(keys[1]).toBe(keys[0]);
+  await expect(page.locator('#compose-tag-list')).toBeEmpty();
+  await expect(page.locator('#compose-tag-count')).toHaveText('0 of 100 tags');
+});
+
+test('tag validation opens collapsed fields, removal restores focus, and editing creates a new request', async ({ page }) => {
+  const requests = await workspace(page);
+  const keys: string[] = [];
+  const payloads: Record<string, unknown>[] = [];
+  await page.route('**/api/send', async route => {
+    payloads.push(route.request().postDataJSON());
+    keys.push(route.request().headers()['idempotency-key']);
+    await route.fulfill({ status: 503, json: { message: 'Sending unavailable.' } });
+  });
+  page.on('dialog', dialog => dialog.accept());
+  await composeReceipt(page);
+  await page.getByLabel('Tag value 1', { exact: true }).fill('invalid value');
+  await page.getByText('Tags (optional)', { exact: true }).click();
+  const send = page.locator('#compose-form').getByRole('button', { name: 'Send email', exact: true });
+  await send.click();
+  await expect(page.getByLabel('Tag value 1', { exact: true })).toBeFocused();
+  expect(keys).toHaveLength(0); expect(requests).not.toContain('/api/send/prepare');
+  await page.getByLabel('Tag value 1', { exact: true }).fill('receipt');
+  await send.click(); await expect(page.locator('#compose-status')).toContainText('Sending unavailable');
+  await page.getByLabel('Tag value 1', { exact: true }).fill('invoice');
+  await send.click(); await expect.poll(() => keys.length).toBe(2); expect(keys[1]).not.toBe(keys[0]);
+  await page.getByRole('button', { name: 'Add tag', exact: true }).click();
+  await page.getByRole('button', { name: 'Remove tag 1', exact: true }).click();
+  await expect(page.getByLabel('Tag name 2', { exact: true })).toBeFocused();
+  await page.getByRole('button', { name: 'Remove tag 2', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Add tag', exact: true })).toBeFocused();
+  await expect(page.locator('#compose-tag-count')).toHaveText('0 of 100 tags');
+  await send.click(); await expect.poll(() => payloads.length).toBe(3); expect(payloads[2].tags).toBeUndefined();
+});
+
+test('published template preparation and scheduling retain tags', async ({ page }) => {
+  await workspace(page);
+  let prepared: Record<string, unknown> | undefined;
+  let sent: Record<string, unknown> | undefined;
+  await page.route('**/api/send/prepare', async route => {
+    prepared = route.request().postDataJSON();
+    await route.fulfill({ json: { from: 'billing@example.com', to: ['customer@example.com'], subject: 'Published receipt', text: 'Published content', tags: prepared!.tags } });
+  });
+  await page.route('**/api/send', async route => { sent = route.request().postDataJSON(); await route.fulfill({ json: { id: emailId } }); });
+  page.on('dialog', dialog => dialog.accept());
+  await composeReceipt(page);
+  await page.getByLabel('Message content', { exact: true }).selectOption('template');
+  await page.getByLabel('Published template ID or alias', { exact: true }).fill('receipt');
+  await page.getByLabel('Send later (optional)', { exact: true }).fill(await page.evaluate(() => { const date = new Date(Date.now() + 3600000); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }));
+  await page.locator('#compose-form').getByRole('button', { name: 'Send email', exact: true }).click();
+  await expect(page.locator('#compose-status')).toContainText('Scheduled for');
+  expect(prepared!.tags).toEqual([{ name: 'category', value: 'receipt' }]);
+  expect(sent!.tags).toEqual(prepared!.tags); expect(sent!.template).toBeUndefined(); expect(sent!.scheduled_at).toBeTruthy();
+});
+
+test('history renders retained tags as text, handles empty tags and keeps unavailable content explicit', async ({ page }) => {
+  await workspace(page);
+  const unsafeName = '<script>untrusted</script>';
+  let empty = false;
+  await page.route(`**/api/history/${emailId}`, route => route.fulfill({ json: { ...email, text: null, html: null, tags: empty ? [] : [{ name: unsafeName, value: 'x'.repeat(256) }], attachments: [] } }));
+  await page.goto('/dashboard/emails');
+  const record = page.locator('.email-record').filter({ hasText: email.subject });
+  await record.locator(':scope > summary').click();
+  await record.getByText('Message content', { exact: true }).click();
+  await expect(record.locator('.message-tags dt')).toHaveText(unsafeName);
+  await expect(record.locator('.message-tags dd')).toHaveText('x'.repeat(256));
+  await expect(record.locator('script')).toHaveCount(0);
+  await expect(record.getByText('Content is unavailable for this message.', { exact: true })).toBeVisible();
+  await noOverflow(page);
+  empty = true; await page.reload();
+  await record.locator(':scope > summary').click(); await record.getByText('Message content', { exact: true }).click();
+  await expect(record.getByText('No tags recorded.', { exact: true })).toBeVisible();
+});
+
+test('tag row limit prevents a 101st entry and sign-out clears metadata', async ({ page }) => {
+  await workspace(page); await composeReceipt(page);
+  // Populate through the same event handler without 99 scrolling animations.
+  await page.locator('#compose-add-tag').evaluate(button => { for (let index = 1; index < 100; index++) (button as HTMLButtonElement).click(); });
+  await expect(page.locator('#compose-tag-list > .compose-tag')).toHaveCount(100);
+  await expect(page.locator('#compose-add-tag')).toBeDisabled();
+  await expect(page.locator('#compose-tag-count')).toHaveText('100 of 100 tags');
+  page.on('dialog', dialog => dialog.accept());
+  const menu = page.getByRole('button', { name: 'Menu', exact: true }); if (await menu.isVisible()) await menu.click();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.locator('#compose-tag-list')).toBeEmpty();
 });

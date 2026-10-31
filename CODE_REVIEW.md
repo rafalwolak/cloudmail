@@ -13,7 +13,8 @@ Review correctness, authorization, confidentiality, compatibility, and data inte
 - Webhooks/Queues: preserve signing bytes, delivery identity, saved payloads across retries/replays, leases, bounded retries, endpoint validation, and queue scoping. Treat responses and received content as untrusted.
 - Templates/UI: preserve escaping, immutable published snapshots, and preview sandbox/CSP restrictions. Check accessible names, keyboard navigation, focus, contrast, loading/empty/error/permission states, long content, and narrow viewports against WCAG 2.2. When moving a form into a disclosure, test existing-record edit actions open it before focusing. Keep attempt status separate from the latest recipient event; one recipient event is not a whole-message delivery result.
 - Performance: check bounded batch/query work, pagination, payload sizes, and unnecessary remote calls. Base optimizations on evidence.
-- Tests: add meaningful regression coverage for changed behavior using existing Node test and Miniflare patterns. Use Playwright for affected browser flows; distinguish manual exploration from committed E2E coverage.
+- Browser validation: HTML `pattern` uses Unicode Sets (`v`) syntax; escape literal hyphens in character classes and exercise invalid inputs in a real browser.
+- Tests: add meaningful regression coverage for changed behavior using existing Node test and Miniflare patterns. Use Playwright for affected browser flows; distinguish manual exploration from committed E2E coverage. Scope label/text locators to the active form or page when hidden SPA screens repeat labels.
 
 ## Validation and evidence
 

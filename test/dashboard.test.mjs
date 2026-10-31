@@ -9,6 +9,11 @@ test('dashboard exposes a labelled sign-in form and loads its script', async () 
   assert.match(html, /<label[^>]+for="password"/);
   assert.match(html, /src="\/dashboard\.js"/);
   assert.equal((await fetch(`${base}/dashboard.js`)).status, 200);
+  assert.match(html, /<script type="module" src="\/dashboard\.js"/);
+  const metricsModule = await fetch(`${base}/dashboard-metrics.js`);
+  assert.equal(metricsModule.status, 200);
+  assert.match(metricsModule.headers.get('content-type'), /javascript/);
+  assert.match(await metricsModule.text(), /export function dailyMetricRows/);
 });
 
 test('dashboard provides registration and password recovery forms', async () => {
