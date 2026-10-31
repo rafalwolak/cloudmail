@@ -370,3 +370,125 @@ test('the module-based dashboard signs in and restores a direct metrics URL', as
   await expect(page.getByRole('img', { name: 'Accepted messages by UTC day', exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/dashboard\/metrics$/);
 });
+
+async function composeReceipt(page: Page) {
+  await page.goto('/dashboard/compose');
+  await page.getByLabel('From', { exact: true }).fill('billing@example.com');
+  await page.getByLabel('To', { exact: true }).fill('customer@example.com');
+  await page.locator('#compose-form').getByLabel('Subject', { exact: true }).fill('Synthetic receipt');
+  await page.getByLabel('Plain text', { exact: true }).fill('Thank you for your order.');
+  await page.getByText('Tags (optional)', { exact: true }).click();
+  await page.getByRole('button', { name: 'Add tag', exact: true }).click();
+  await expect(page.getByLabel('Tag name 1', { exact: true })).toBeFocused();
+  await page.getByLabel('Tag name 1', { exact: true }).fill('category');
+  await page.getByLabel('Tag value 1', { exact: true }).fill('receipt');
+}
+
+test('composer retains tags and idempotency key on retry and resets after acceptance', async ({ page }, testInfo) => {
+  await workspace(page);
+  const payloads: { tags?: { name: string; value: string }[] }[] = [];
+  const keys: string[] = [];
+  await page.route('**/api/send', async route => {
+    payloads.push(route.request().postDataJSON()); keys.push(route.request().headers()['idempotency-key']);
+    await route.fulfill({ status: payloads.length === 1 ? 503 : 200, json: payloads.length === 1 ? { message: 'Sending unavailable.' } : { id: emailId } });
+  });
+  page.on('dialog', dialog => dialog.accept());
+  await composeReceipt(page);
+  await page.getByRole('button', { name: 'Add tag', exact: true }).click();
+  await page.getByLabel('Tag name 2', { exact: true }).fill('order_id');
+  await page.getByLabel('Tag value 2', { exact: true }).fill('ORDER-123');
+  await noOverflow(page);
+  await capture(page, testInfo.outputPath('compose-tags.png'));
+  const send = page.locator('#compose-form').getByRole('button', { name: 'Send email', exact: true });
+  await send.click();
+  await expect(page.locator('#compose-status')).toContainText('Check history before trying again');
+  await expect(page.getByLabel('Tag value 2', { exact: true })).toHaveValue('ORDER-123');
+  await send.click();
+  await expect(page.locator('#compose-status')).toContainText('Accepted by Cloudflare');
+  expect(payloads[0].tags).toEqual([{ name: 'category', value: 'receipt' }, { name: 'order_id', value: 'ORDER-123' }]);
+  expect(payloads[1]).toEqual(payloads[0]); expect(keys[0]).toBeTruthy(); expect(keys[1]).toBe(keys[0]);
+  await expect(page.locator('#compose-tag-list')).toBeEmpty();
+  await expect(page.locator('#compose-tag-count')).toHaveText('0 of 100 tags');
+});
+
+test('tag validation opens collapsed fields, removal restores focus, and editing creates a new request', async ({ page }) => {
+  const requests = await workspace(page);
+  const keys: string[] = [];
+  const payloads: Record<string, unknown>[] = [];
+  await page.route('**/api/send', async route => {
+    payloads.push(route.request().postDataJSON());
+    keys.push(route.request().headers()['idempotency-key']);
+    await route.fulfill({ status: 503, json: { message: 'Sending unavailable.' } });
+  });
+  page.on('dialog', dialog => dialog.accept());
+  await composeReceipt(page);
+  await page.getByLabel('Tag value 1', { exact: true }).fill('invalid value');
+  await page.getByText('Tags (optional)', { exact: true }).click();
+  const send = page.locator('#compose-form').getByRole('button', { name: 'Send email', exact: true });
+  await send.click();
+  await expect(page.getByLabel('Tag value 1', { exact: true })).toBeFocused();
+  expect(keys).toHaveLength(0); expect(requests).not.toContain('/api/send/prepare');
+  await page.getByLabel('Tag value 1', { exact: true }).fill('receipt');
+  await send.click(); await expect(page.locator('#compose-status')).toContainText('Sending unavailable');
+  await page.getByLabel('Tag value 1', { exact: true }).fill('invoice');
+  await send.click(); await expect.poll(() => keys.length).toBe(2); expect(keys[1]).not.toBe(keys[0]);
+  await page.getByRole('button', { name: 'Add tag', exact: true }).click();
+  await page.getByRole('button', { name: 'Remove tag 1', exact: true }).click();
+  await expect(page.getByLabel('Tag name 2', { exact: true })).toBeFocused();
+  await page.getByRole('button', { name: 'Remove tag 2', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Add tag', exact: true })).toBeFocused();
+  await expect(page.locator('#compose-tag-count')).toHaveText('0 of 100 tags');
+  await send.click(); await expect.poll(() => payloads.length).toBe(3); expect(payloads[2].tags).toBeUndefined();
+});
+
+test('published template preparation and scheduling retain tags', async ({ page }) => {
+  await workspace(page);
+  let prepared: Record<string, unknown> | undefined;
+  let sent: Record<string, unknown> | undefined;
+  await page.route('**/api/send/prepare', async route => {
+    prepared = route.request().postDataJSON();
+    await route.fulfill({ json: { from: 'billing@example.com', to: ['customer@example.com'], subject: 'Published receipt', text: 'Published content', tags: prepared!.tags } });
+  });
+  await page.route('**/api/send', async route => { sent = route.request().postDataJSON(); await route.fulfill({ json: { id: emailId } }); });
+  page.on('dialog', dialog => dialog.accept());
+  await composeReceipt(page);
+  await page.getByLabel('Message content', { exact: true }).selectOption('template');
+  await page.getByLabel('Published template ID or alias', { exact: true }).fill('receipt');
+  await page.getByLabel('Send later (optional)', { exact: true }).fill(await page.evaluate(() => { const date = new Date(Date.now() + 3600000); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }));
+  await page.locator('#compose-form').getByRole('button', { name: 'Send email', exact: true }).click();
+  await expect(page.locator('#compose-status')).toContainText('Scheduled for');
+  expect(prepared!.tags).toEqual([{ name: 'category', value: 'receipt' }]);
+  expect(sent!.tags).toEqual(prepared!.tags); expect(sent!.template).toBeUndefined(); expect(sent!.scheduled_at).toBeTruthy();
+});
+
+test('history renders retained tags as text, handles empty tags and keeps unavailable content explicit', async ({ page }) => {
+  await workspace(page);
+  const unsafeName = '<script>untrusted</script>';
+  let empty = false;
+  await page.route(`**/api/history/${emailId}`, route => route.fulfill({ json: { ...email, text: null, html: null, tags: empty ? [] : [{ name: unsafeName, value: 'x'.repeat(256) }], attachments: [] } }));
+  await page.goto('/dashboard/emails');
+  const record = page.locator('.email-record').filter({ hasText: email.subject });
+  await record.locator(':scope > summary').click();
+  await record.getByText('Message content', { exact: true }).click();
+  await expect(record.locator('.message-tags dt')).toHaveText(unsafeName);
+  await expect(record.locator('.message-tags dd')).toHaveText('x'.repeat(256));
+  await expect(record.locator('script')).toHaveCount(0);
+  await expect(record.getByText('Content is unavailable for this message.', { exact: true })).toBeVisible();
+  await noOverflow(page);
+  empty = true; await page.reload();
+  await record.locator(':scope > summary').click(); await record.getByText('Message content', { exact: true }).click();
+  await expect(record.getByText('No tags recorded.', { exact: true })).toBeVisible();
+});
+
+test('tag row limit prevents a 101st entry and sign-out clears metadata', async ({ page }) => {
+  await workspace(page); await composeReceipt(page);
+  // Populate through the same event handler without 99 scrolling animations.
+  await page.locator('#compose-add-tag').evaluate(button => { for (let index = 1; index < 100; index++) (button as HTMLButtonElement).click(); });
+  await expect(page.locator('#compose-tag-list > .compose-tag')).toHaveCount(100);
+  await expect(page.locator('#compose-add-tag')).toBeDisabled();
+  await expect(page.locator('#compose-tag-count')).toHaveText('100 of 100 tags');
+  page.on('dialog', dialog => dialog.accept());
+  const menu = page.getByRole('button', { name: 'Menu', exact: true }); if (await menu.isVisible()) await menu.click();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.locator('#compose-tag-list')).toBeEmpty();
+});

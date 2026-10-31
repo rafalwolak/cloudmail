@@ -266,3 +266,13 @@ summary { cursor: pointer; min-height: 40px; padding: 8px 0; color: var(--ink); 
   .metrics-scale { min-width: 24px; }
   .metrics-dates { margin-left: 36px; }
 }
+
+.compose-tags { margin: 24px 0; border-top: 1px solid var(--line); padding-top: 8px; }
+.compose-tag { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 12px; align-items: end; margin-bottom: 16px; }
+.compose-tag label { margin-top: 0; }
+.message-tags { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 8px 16px; overflow-wrap: anywhere; }
+.message-tags dd { margin: 0; }
+@media (max-width: 760px) {
+  .compose-tag { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .compose-tag button { justify-self: start; }
+}
