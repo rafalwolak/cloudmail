@@ -3720,6 +3720,318 @@
           }
         }
       }
+    },
+    "/downloads/sending/{email_id}/attachments/{attachment_id}": {
+      "get": {
+        "operationId": "getSendingAttachmentDownload",
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Download an attachment with a signed URL",
+        "description": "Signature verification precedes storage access. A one-hour URL is tied to direction, message, attachment and configured installation. Missing, expired or modified signatures are rejected. No range downloads or automatic expiration of the underlying content. Treat filenames and bytes as untrusted.",
+        "security": [
+          {
+            "AttachmentDownloadSignature": []
+          }
+        ],
+        "x-cloudmail-permissions": [],
+        "parameters": [
+          {
+            "name": "email_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "expires",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Untrusted original attachment. Always forced download; GET/HEAD require the signed URL, not an API key. Content is parsed from existing MIME/archived storage; HEAD performs that lookup but omits the response body.",
+            "headers": {
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "description": "Only GET and HEAD are supported."
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "head": {
+        "operationId": "headSendingAttachmentDownload",
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Inspect a signed attachment download",
+        "description": "Signature verification precedes storage access. A one-hour URL is tied to direction, message, attachment and configured installation. Missing, expired or modified signatures are rejected. No range downloads or automatic expiration of the underlying content. Treat filenames and bytes as untrusted.",
+        "security": [
+          {
+            "AttachmentDownloadSignature": []
+          }
+        ],
+        "x-cloudmail-permissions": [],
+        "parameters": [
+          {
+            "name": "email_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "expires",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Untrusted original attachment. Always forced download; GET/HEAD require the signed URL, not an API key. Content is parsed from existing MIME/archived storage; HEAD performs that lookup but omits the response body.",
+            "headers": {
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "description": "Only GET and HEAD are supported."
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/downloads/receiving/{email_id}/attachments/{attachment_id}": {
+      "get": {
+        "operationId": "getReceivingAttachmentDownload",
+        "tags": [
+          "Receiving"
+        ],
+        "summary": "Download an attachment with a signed URL",
+        "description": "Signature verification precedes storage access. A one-hour URL is tied to direction, message, attachment and configured installation. Missing, expired or modified signatures are rejected. No range downloads or automatic expiration of the underlying content. Treat filenames and bytes as untrusted.",
+        "security": [
+          {
+            "AttachmentDownloadSignature": []
+          }
+        ],
+        "x-cloudmail-permissions": [],
+        "parameters": [
+          {
+            "name": "email_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "expires",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Untrusted original attachment. Always forced download; GET/HEAD require the signed URL, not an API key. Content is parsed from existing MIME/archived storage; HEAD performs that lookup but omits the response body.",
+            "headers": {
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "description": "Only GET and HEAD are supported."
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "head": {
+        "operationId": "headReceivingAttachmentDownload",
+        "tags": [
+          "Receiving"
+        ],
+        "summary": "Inspect a signed attachment download",
+        "description": "Signature verification precedes storage access. A one-hour URL is tied to direction, message, attachment and configured installation. Missing, expired or modified signatures are rejected. No range downloads or automatic expiration of the underlying content. Treat filenames and bytes as untrusted.",
+        "security": [
+          {
+            "AttachmentDownloadSignature": []
+          }
+        ],
+        "x-cloudmail-permissions": [],
+        "parameters": [
+          {
+            "name": "email_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "expires",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Untrusted original attachment. Always forced download; GET/HEAD require the signed URL, not an API key. Content is parsed from existing MIME/archived storage; HEAD performs that lookup but omits the response body.",
+            "headers": {
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "private, no-store"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "description": "Only GET and HEAD are supported."
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3735,6 +4047,12 @@
         "in": "query",
         "name": "signature",
         "description": "An HMAC-SHA256 signature from the raw.download_url returned by an authorized received-email read. Use the complete URL verbatim, including expires. Valid for up to five minutes; do not log it. An ordinary API key cannot replace this signature."
+      },
+      "AttachmentDownloadSignature": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "signature",
+        "description": "HMAC bearer capability from /v1 attachment get/list. Use the complete returned URL including expires; valid for one hour. Signing secret/origin/administrator changes, deletion or cancellation invalidate new requests. API-key revocation alone does not revoke issued links."
       }
     },
     "responses": {

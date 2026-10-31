@@ -58,9 +58,36 @@ The `skills/cloudmail` directory contains a reusable agent skill. Treat inbound 
 
 `GET /openapi.json` publishes the supported public REST API as a self-contained OpenAPI 3.1.1 document. It needs no credentials and supports `HEAD`, `OPTIONS`, and cross-origin reads. The home response advertises it with a `Link` header using `rel="service-desc"`. The relative server URL `/` resolves to the installation serving the document; configure your own installation origin when importing a downloaded copy into a client.
 
-The contract covers 46 HTTP operations across sending, schedules, metrics, templates, received messages, private attachments, API keys, experimental domains, and webhooks. It describes current Cloudmail behavior and its Resend compatibility limits. Dashboard session endpoints and MCP tools have separate interfaces. Bearer keys remain required for REST operations: only single and batch sending accept `sending_access`; other documented operations require `full_access`. Never paste credentials into the public document or an external documentation service.
+The contract covers 50 HTTP operations across sending, schedules, metrics, templates, received messages, private attachments, API keys, experimental domains, and webhooks. It describes current Cloudmail behavior and its Resend compatibility limits. Dashboard session endpoints and MCP tools have separate interfaces. Bearer keys remain required for REST operations: only single and batch sending accept `sending_access`; other documented operations require `full_access`. Never paste credentials into the public document or an external documentation service.
 
 Request schemas describe supported fields; the server also enforces combined recipient limits, byte limits, template declarations, current scheduling windows, permissions and provider readiness. Examples use synthetic addresses. CI validates the document and checks actual local API responses against its schemas. Keep `public/openapi.json` synchronized with public behavior when adding or changing routes.
+
+## Official Resend SDK adapter
+
+Use `https://YOUR_WORKER_URL/v1` as the SDK base URL. This additive adapter shares the existing storage and bearer permission handlers; it does not alias dashboard sessions, Better Auth routes, MCP, assets or signed-download routes. It currently improves attachment interoperability, not complete Resend compatibility. Delegated sending, templates, schedules, metrics, keys, domains and webhooks retain Cloudmail's documented limits. Use SDK camelCase input names (`scheduledAt`, `contentType`, `contentId`); the SDK converts them to HTTP fields.
+
+```js
+import { Resend } from 'resend';
+
+const cloudmail = new Resend(process.env.CLOUDMAIL_API_KEY, {
+  baseUrl: 'https://YOUR_WORKER_URL/v1',
+});
+const { data, error } = await cloudmail.emails.attachments.list({ emailId });
+if (error) throw new Error(error.message);
+// Use the returned UUID with this message; do not log the signed download URL.
+const attachment = await cloudmail.emails.attachments.get({
+  emailId,
+  id: data.data[0].id,
+});
+```
+
+Use this server-side, with a full-access key for reading private metadata. Sending-only keys retain their sending permission and cannot obtain attachment capabilities. Receiving uses `cloudmail.emails.receiving.attachments.list/get`. Lists support `limit`, `before` and `after` using stable returned attachment UUIDs scoped to the message and direction. Do not mix these UUIDs with the legacy API/MCP's index IDs. The adapter's sent/received email details expose the same UUIDs; received `to` is an array while legacy details keep the original string. The SMTP envelope and untrusted header addresses remain distinct.
+
+Attachment list/get returns `download_url` and `expires_at`. A link grants GET/HEAD access without cookies or an API key for one hour. Treat it as a temporary credential. Modification, expiry, a changed installation signing secret/origin/administrator, message deletion or schedule cancellation prevents subsequent downloads. Key revocation or sign-out alone does not revoke a link already issued. No range downloads are supported. Attachment retrieval parses existing MIME or archived content; HEAD performs the lookup but does not return a body. The underlying data has no automatic expiration. Preserve query-string redaction in Cloudflare and any additional client/proxy logging.
+
+The unversioned API and dashboard/MCP keep their binary download endpoints and index identities. Existing five-minute raw MIME signatures remain valid across this change. Signing requires valid `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL`; metadata operations that need a link return 503 when they are unavailable. `/v1` adds `name` and `statusCode` to errors and returns a JSON ID for API-key deletion for SDK parsing; legacy statuses and responses stay unchanged.
+
+`GET /v1/openapi.json` describes the adapter and supports public HEAD/OPTIONS/CORS like the original document. Its committed asset is derived from `public/openapi.json` by `scripts/generate-resend-openapi.mjs`; run that script with `--write` after changing the source contract or adapter representations. `npm run check` rejects a stale generated document. The official Resend SDK is a development dependency used against the local Worker, not a Worker runtime dependency. The SDK and contracts do not establish external Cloudflare domain readiness or live delivery.
 
 ## Optional Cloudflare delivery events
 
