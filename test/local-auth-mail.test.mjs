@@ -28,13 +28,14 @@ test('verification capture matches recipient and origin instead of following the
 
 test('local mail capture ignores old files and waits for the requested newly saved text email', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'cloudmail-mail-fixture-'));
+  let saved = Promise.resolve();
   try {
     await mkdir(join(directory, 'email-text'));
-    await writeFile(join(directory, 'email-text/old.txt'), verification('admin@example.com'));
+    await writeFile(join(directory, 'email-text/old.txt'), `${verification('admin@example.com')}&generation=old`);
     const result = await captureLocalAuthLink(async () => {
-      await writeFile(join(directory, 'email-text/new.txt'), verification('admin@example.com'));
+      saved = new Promise(resolve => setTimeout(resolve, 20)).then(() => writeFile(join(directory, 'email-text/new.txt'), `${verification('admin@example.com')}&generation=new`));
       return new Response(null, { status: 200 });
     }, { base, pathname: '/api/auth/verify-email', email: 'admin@example.com', directory });
-    assert.equal(result.href, verification('admin@example.com'));
-  } finally { await rm(directory, { recursive: true }); }
+    assert.equal(result.href, `${verification('admin@example.com')}&generation=new`);
+  } finally { await saved; await rm(directory, { recursive: true }); }
 });
