@@ -16,6 +16,7 @@ test('deployment advertises a secret without a shared default and keeps signup d
   const example = await readFile(new URL('../.dev.vars.example', import.meta.url), 'utf8');
   assert.match(example, /^BETTER_AUTH_SECRET=$/m);
   assert.equal(config.vars.ENABLE_SIGNUP, 'false');
+  assert.equal(config.observability.redact_query_string, true);
   for (const binding of ['BETTER_AUTH_SECRET', 'ENABLE_SIGNUP', 'DB', 'INBOUND']) assert.ok(packageJson.cloudflare.bindings[binding].description);
 });
 

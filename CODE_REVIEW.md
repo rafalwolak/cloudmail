@@ -15,7 +15,7 @@ Review correctness, authorization, confidentiality, compatibility, and data inte
 - Performance: check bounded batch/query work, pagination, payload sizes, and unnecessary remote calls. Base optimizations on evidence.
 - Browser validation: HTML `pattern` uses Unicode Sets (`v`) syntax; escape literal hyphens in character classes and exercise invalid inputs in a real browser.
 - DOM edits: scope repeated construction snippets to their owning function and inspect the resulting diff; similar sent/inbound record builders must not receive each other's actions.
-- Tests: add meaningful regression coverage for changed behavior using existing Node test and Miniflare patterns. Use Playwright for affected browser flows; distinguish manual exploration from committed E2E coverage. Scope label/text locators to the active form or page when hidden SPA screens repeat labels. Assert disabled states on interactive controls rather than fieldset containers.
+- Tests: modules imported directly by the Node test runner use explicit `.ts` extensions for runtime imports. Add meaningful regression coverage for changed behavior using existing Node test and Miniflare patterns. Use Playwright for affected browser flows; distinguish manual exploration from committed E2E coverage. Scope label/text locators to the active form or page when hidden SPA screens repeat labels. Assert disabled states on interactive controls rather than fieldset containers.
 
 ## Validation and evidence
 

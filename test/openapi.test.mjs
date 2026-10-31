@@ -28,11 +28,11 @@ async function contract(path, method, template, status = 200, body) {
 
 test('OpenAPI document is valid, self-contained, relocatable and explicit about key permissions', () => {
   assert.equal(source.openapi, '3.1.1'); assert.deepEqual(source.servers.map(server => server.url), ['/']);
-  assert.equal(Object.keys(source.paths).length, 31);
+  assert.equal(Object.keys(source.paths).length, 32);
   const operations = Object.values(source.paths).flatMap(path => Object.values(path));
-  assert.equal(operations.length, 44); assert.equal(new Set(operations.map(op => op.operationId)).size, 44);
+  assert.equal(operations.length, 46); assert.equal(new Set(operations.map(op => op.operationId)).size, 46);
   for (const [path, item] of Object.entries(source.paths)) for (const [method, operation] of Object.entries(item)) {
-    assert.deepEqual(operation['x-cloudmail-permissions'], method === 'post' && ['/emails', '/emails/batch'].includes(path) ? ['full_access', 'sending_access'] : ['full_access']);
+    assert.deepEqual(operation['x-cloudmail-permissions'], path.startsWith('/downloads/') ? [] : method === 'post' && ['/emails', '/emails/batch'].includes(path) ? ['full_access', 'sending_access'] : ['full_access']);
     for (const name of path.matchAll(/\{([^}]+)\}/g)) assert.ok(operation.parameters?.some(param => param.in === 'path' && param.name === name[1] && param.required));
   }
   function visit(value) { if (!value || typeof value !== 'object') return; if (value.$ref) assert.ok(value.$ref.startsWith('#/')); Object.values(value).forEach(visit); }
