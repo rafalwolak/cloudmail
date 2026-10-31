@@ -88,3 +88,12 @@ test('raw downloads fail closed when configuration, records or content are unava
   assert.equal((await downloadReceivedRaw(new Request(raw.download_url), { ...env, INBOUND: { get: async () => null } }, now)).status, 503);
   assert.equal((await downloadReceivedRaw(new Request(raw.download_url), { ...env, INBOUND: { get: async () => { throw new Error('Storage unavailable'); } } }, now)).status, 503);
 });
+
+test('raw signatures issued before the shared signer refactor remain valid', async () => {
+  const { createHmac } = await import('node:crypto');
+  const { env } = fixture(); const expires = now / 1000 + 300;
+  const signature = createHmac('sha256', env.BETTER_AUTH_SECRET).update(JSON.stringify(['cloudmail:received-raw:v1', env.BETTER_AUTH_URL, env.ADMIN_EMAIL, id, expires])).digest('hex');
+  const url = new URL(`/downloads/receiving/${id}/raw`, env.BETTER_AUTH_URL);
+  url.searchParams.set('expires', String(expires)); url.searchParams.set('signature', signature);
+  assert.equal((await downloadReceivedRaw(new Request(url), env, now)).status, 200);
+});

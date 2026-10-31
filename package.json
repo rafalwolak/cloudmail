@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
-    "check": "tsc --noEmit",
+    "check": "node scripts/generate-resend-openapi.mjs --check && tsc --noEmit",
     "test": "node --test --test-concurrency=1 test/*.test.mjs",
     "test:e2e": "playwright test"
   },
@@ -31,6 +31,7 @@
     "ajv-formats": "^3.0.1",
     "esbuild": "^0.28.2",
     "miniflare": "^5.20261023.3-beta",
+    "resend": "^6.37.0",
     "typescript": "^7.0.2",
     "wrangler": "^4.156.0"
   },

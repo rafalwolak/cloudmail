@@ -133,7 +133,7 @@ The `om-auto-*` skills run this process unattended and are chainable: each accep
 
 Every PR passes the full validation gate before review sign-off, in this order:
 
-- `npm run check`
+- `npm run check` (generated `/v1` OpenAPI drift check, then TypeScript)
 - `npm test`
 - `npm run test:e2e`
 

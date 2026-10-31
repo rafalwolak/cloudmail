@@ -1,3 +1,5 @@
+import { handleResendApi } from './resend-api';
+import { downloadAttachment } from './attachment-download';
 import { downloadReceivedRaw } from './received-raw';
 import { previewTemplate, previewToken } from './template-preview';
 import { discovery } from './discovery';
@@ -54,7 +56,7 @@ async function sendEmailRequest(request: Request, env: Env, sendingDomain: strin
 
 const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cloudmail - transactional email on Cloudflare</title><style>body{margin:0;background:#101613;color:#f2f4ec;font:16px system-ui}main{max-width:1000px;margin:auto;padding:36px 24px}nav{display:flex;justify-content:space-between;align-items:center}a{color:#c0efa0}header{padding:110px 0 80px}h1{font-size:clamp(48px,8vw,100px);line-height:.98;letter-spacing:-.06em;max-width:800px;margin:22px 0}p{line-height:1.7;color:#b9c5b8;max-width:620px}.tag{color:#b9ec94;font-size:13px;letter-spacing:.12em;text-transform:uppercase}section{border-top:1px solid #39443c;padding:35px 0}code{color:#b9ec94}footer{padding:60px 0;color:#9aab9c}</style></head><body><main><nav><strong>✳ CLOUDMAIL</strong><a href="/dashboard">Dashboard ↗</a></nav><header><span class="tag">Open source · Cloudflare native</span><h1>Email, on your own terms.</h1><p>A self-hosted foundation for transactional email. Built for developers who want a simple API and infrastructure they control.</p></header><section><span class="tag">Early development</span><h2>Built in the open.</h2><p>Cloudmail is under active development. Email sending requires a verified Cloudflare sending domain and an API key. Sign in to manage your API keys in the dashboard.</p><p>API endpoint: <code>POST /emails</code></p></section><footer>Cloudmail · Transactional email only</footer></main></body></html>`;
 
-export default {
+const worker = {
   async email(message: ForwardableEmailMessage, env: Env): Promise<void> { await receiveEmail(message, env); },
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await processScheduled(env); await processWebhooks(env); },
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
@@ -63,18 +65,20 @@ export default {
   },
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (/^\/downloads\/(sending|receiving)\/.*\/attachments\//.test(url.pathname)) return downloadAttachment(request, env);
     if (url.pathname.startsWith('/downloads/receiving/')) return downloadReceivedRaw(request, env);
-    if (url.pathname === '/openapi.json') {
+    if (url.pathname === '/openapi.json' || url.pathname === '/v1/openapi.json') {
       const publicHeaders = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, HEAD, OPTIONS', 'access-control-allow-headers': 'If-None-Match', 'access-control-expose-headers': 'ETag', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
       if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: publicHeaders });
       if (!['GET', 'HEAD'].includes(request.method)) return Response.json({ message: 'Method not allowed' }, { status: 405, headers: { ...publicHeaders, allow: 'GET, HEAD, OPTIONS' } });
-      const asset = await env.ASSETS.fetch(request);
+      const asset = await env.ASSETS.fetch(url.pathname === '/v1/openapi.json' ? new Request(new URL('/openapi-v1.json', url), request) : request);
       const headers = new Headers(asset.headers);
       for (const [name, value] of Object.entries(publicHeaders)) headers.set(name, value);
       headers.set('content-type', 'application/json');
       headers.set('content-security-policy', "default-src 'none'; base-uri 'none'; frame-ancestors 'none'");
       return new Response(request.method === 'HEAD' ? null : asset.body, { status: asset.status, headers });
     }
+    if (url.pathname.startsWith('/v1/')) return handleResendApi(request, env, legacy => worker.fetch(legacy, env));
     if (url.pathname === '/mcp/server-card' || url.pathname === '/.well-known/ai-catalog.json') return discovery(request, env.BETTER_AUTH_URL);
     if (url.pathname === '/api/setup' && request.method === 'GET') {
       const authentication = authenticationConfigured(env);
@@ -174,7 +178,7 @@ export default {
       headers.set('cache-control', 'no-store');
       return new Response(response.body, { status: response.status, headers });
     }
-    if (url.pathname === '/' && request.method === 'GET') return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'", 'x-content-type-options': 'nosniff', 'link': '</openapi.json>; rel="service-desc"; type="application/json"' } });
+    if (url.pathname === '/' && request.method === 'GET') return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'", 'x-content-type-options': 'nosniff', 'link': '</openapi.json>; rel="service-desc"; type="application/json", </v1/openapi.json>; rel="service-desc"; type="application/json"; title="SDK API"' } });
     if (url.pathname !== '/mcp' && !(url.pathname === '/domains' || url.pathname.startsWith('/domains/')) && !(url.pathname === '/webhooks' || url.pathname.startsWith('/webhooks/')) && !(url.pathname === '/api-keys' || url.pathname.startsWith('/api-keys/')) && !(url.pathname === '/templates' || url.pathname.startsWith('/templates/')) && !(url.pathname === '/emails/batch' && request.method === 'POST') && !(url.pathname === '/emails' && ['GET', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/') && ['GET', 'PATCH', 'POST'].includes(request.method)) && !(url.pathname.startsWith('/emails/receiving/') && request.method === 'DELETE')) return Response.json({ message: 'Not found' }, { status: 404 });
     const authorization = request.headers.get('Authorization') || '';
     const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
@@ -209,3 +213,5 @@ export default {
     return sendEmailRequest(request, env, access.sending_domain);
   }
 };
+
+export default worker;
