@@ -21,6 +21,7 @@ jobs:
       TEST_BASE_URL: http://127.0.0.1:8787
       TEST_D1_CONFIG: wrangler.jsonc
       TEST_CRON: 'true'
+      TEST_INBOUND: 'true'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -74,7 +75,7 @@ jobs:
           JS
 
           node_modules/.bin/wrangler d1 migrations apply DB --local --persist-to "$TEST_D1_PERSIST"
-          node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port 8787 --persist-to "$TEST_D1_PERSIST" --log-level warn > "$worker_log" 2>&1 &
+          node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port 8787 --persist-to "$TEST_D1_PERSIST" --var INBOUND_ENABLED:true --var INBOUND_ADDRESSES:inbox@example.com --log-level warn > "$worker_log" 2>&1 &
           worker_pid=$!
           export worker_pid
           wait_for_worker() {
@@ -107,7 +108,7 @@ jobs:
           TEST_KEYS=true
           TEST_PASSWORD_RESET=true
           export TEST_DASHBOARD_ADMIN TEST_DASHBOARD_PASSWORD TEST_SIGNUP TEST_KEYS TEST_PASSWORD_RESET
-          node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port 8787 --persist-to "$TEST_D1_PERSIST" --var ENABLE_SIGNUP:true --var "ADMIN_EMAIL:$TEST_DASHBOARD_ADMIN" --var AUTH_EMAIL_FROM:sender@example.com --log-level warn > "$worker_log" 2>&1 &
+          node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port 8787 --persist-to "$TEST_D1_PERSIST" --var ENABLE_SIGNUP:true --var "ADMIN_EMAIL:$TEST_DASHBOARD_ADMIN" --var AUTH_EMAIL_FROM:sender@example.com --var INBOUND_ENABLED:true --var INBOUND_ADDRESSES:inbox@example.com --log-level warn > "$worker_log" 2>&1 &
           worker_pid=$!
           wait_for_worker
           node scripts/prepare-local-admin.mjs
