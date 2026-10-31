@@ -52,6 +52,7 @@ async function workspace(page: Page, options: { historyError?: boolean; anonymou
 }
 
 async function navigate(page: Page, label: string) {
+  await expect(page.locator('#dashboard-view')).toBeVisible();
   const toggle = page.getByRole('button', { name: 'Menu', exact: true });
   if (await toggle.isVisible()) await toggle.click();
   await page.getByRole('navigation', { name: 'Dashboard navigation' }).getByRole('link', { name: label, exact: true }).click();
@@ -730,4 +731,21 @@ test('a failed inbox refresh leaves canceled original downloads with an accurate
   await expect(page.getByText('Download canceled.', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Download .eml', exact: true })).toBeEnabled();
   await expect(page.getByText('Downloading original message…', { exact: true })).toHaveCount(0);
+});
+
+test('responsive navigation waits for delayed session bootstrap before checking the menu', async ({ page }) => {
+  await workspace(page);
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+  let started!: () => void; const requested = new Promise<void>(resolve => { started = resolve; });
+  await page.route('**/api/auth/get-session', async route => {
+    started(); await gate;
+    await route.fulfill({ json: { user: { email: 'admin@example.com', emailVerified: true } } });
+  });
+  await page.goto('/dashboard'); await requested;
+  const navigating = navigate(page, 'Inbox');
+  await expect(page.locator('#dashboard-view')).toBeHidden();
+  // Observe the pre-bootstrap menu before releasing the session, matching the CI race.
+  expect(await page.getByRole('button', { name: 'Menu', exact: true }).isVisible()).toBe(false);
+  release(); await navigating;
+  await expect(page.getByRole('heading', { name: 'Inbox', exact: true })).toBeVisible();
 });
