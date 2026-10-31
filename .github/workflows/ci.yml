@@ -48,7 +48,11 @@ jobs:
             fi
             rm -f .dev.vars
             if [ "$result" -ne 0 ] && [ -f "$worker_log" ]; then
-              cat "$worker_log"
+              if [ "${TEST_SIGNUP:-false}" = true ]; then
+                echo "Authentication-profile Worker output withheld because it may contain verification or reset links."
+              else
+                cat "$worker_log"
+              fi
             fi
             exit "$result"
           }
@@ -73,26 +77,39 @@ jobs:
           node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port 8787 --persist-to "$TEST_D1_PERSIST" --log-level warn > "$worker_log" 2>&1 &
           worker_pid=$!
           export worker_pid
-          if timeout 60s bash -e -o pipefail <<'SH'
-          while true; do
-            if curl --fail --silent --connect-timeout 1 --max-time 2 "$TEST_BASE_URL/api/setup" -o "$RUNNER_TEMP/cloudmail-health.json"; then
-              node -e 'const fs = require("node:fs"); const health = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/cloudmail-health.json", "utf8")); if (!health.authentication_configured || !health.authentication_origin_matches) process.exit(1);'
-              exit 0
-            fi
-            if ! kill -0 "$worker_pid" 2>/dev/null; then
-              echo "Local Worker exited before becoming ready" >&2
-              exit 1
-            fi
-            sleep 1
-          done
-          SH
-          then
-            npm test
-            npm run test:e2e
-          else
-            result=$?
-            if [ "$result" -eq 124 ]; then
-              echo "Local Worker did not become ready within 60 seconds" >&2
-            fi
-            exit "$result"
-          fi
+          wait_for_worker() {
+            local deadline=$((SECONDS + 60))
+            while [ "$SECONDS" -lt "$deadline" ]; do
+              if curl --fail --silent --connect-timeout 1 --max-time 2 "$TEST_BASE_URL/api/setup" -o "$RUNNER_TEMP/cloudmail-health.json"; then
+                if node -e 'const fs = require("node:fs"); const health = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/cloudmail-health.json", "utf8")); if (!health.authentication_configured || !health.authentication_origin_matches || health.registration_enabled !== (process.env.TEST_SIGNUP === "true")) process.exit(1);'; then
+                  return 0
+                fi
+              fi
+              if ! kill -0 "$worker_pid" 2>/dev/null; then
+                echo "Local Worker exited before becoming ready" >&2
+                return 1
+              fi
+              sleep 1
+            done
+            echo "Local Worker did not become ready within 60 seconds" >&2
+            return 1
+          }
+          wait_for_worker
+          npm test
+
+          # Exercise real local registration, verification, sessions and key permissions.
+          kill "$worker_pid"
+          wait "$worker_pid" 2>/dev/null || true
+          worker_pid=
+          TEST_DASHBOARD_ADMIN="ci-admin@example.com"
+          TEST_DASHBOARD_PASSWORD=$(openssl rand -hex 32)
+          TEST_SIGNUP=true
+          TEST_KEYS=true
+          TEST_PASSWORD_RESET=true
+          export TEST_DASHBOARD_ADMIN TEST_DASHBOARD_PASSWORD TEST_SIGNUP TEST_KEYS TEST_PASSWORD_RESET
+          node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port 8787 --persist-to "$TEST_D1_PERSIST" --var ENABLE_SIGNUP:true --var "ADMIN_EMAIL:$TEST_DASHBOARD_ADMIN" --var AUTH_EMAIL_FROM:sender@example.com --log-level warn > "$worker_log" 2>&1 &
+          worker_pid=$!
+          wait_for_worker
+          node scripts/prepare-local-admin.mjs
+          npm test
+          npm run test:e2e
