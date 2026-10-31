@@ -64,6 +64,10 @@ export async function ensureDeliverySubscription(db: D1Database, token: string, 
     if (plan.action !== 'create') return plan;
     uncertain = true;
     const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/event_subscriptions/subscriptions`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(plan.request), redirect: 'manual', signal: AbortSignal.timeout(10000) });
+    if (response.status === 401 || response.status === 403) {
+      uncertain = false;
+      throw new CloudflareQueueAccessError();
+    }
     if (!response.ok) throw new Error('Cloudflare subscription creation could not be confirmed');
     const body = await response.json() as { success?: unknown; result?: unknown };
     if (body.success !== true || !body.result || typeof body.result !== 'object') throw new Error('Cloudflare subscription creation could not be confirmed');
