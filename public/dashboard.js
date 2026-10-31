@@ -40,6 +40,7 @@ $('#dashboard-sidebar').addEventListener('keydown', event => {
 const dashboardPages = new Set(['overview', 'emails', 'inbox', 'compose', 'templates', 'domains', 'metrics', 'api-keys', 'webhooks']);
 function showDashboardPage(page, focus = false) {
   if (!dashboardPages.has(page)) page = 'overview';
+  if (page !== 'inbox') cancelInboxDownloads();
   document.querySelectorAll('[data-dashboard-page]').forEach(section => { section.hidden = section.dataset.dashboardPage !== page; });
   document.querySelectorAll('.dashboard-sidebar [data-page]').forEach(link => {
     if (link.dataset.page === page) link.setAttribute('aria-current', 'page');
@@ -86,7 +87,7 @@ function setSignedIn(session) {
   $('#key-value').textContent = '';
   if (session) { $('#account').textContent = session.user.email; if (cloudflareConnected) $('#cloudflare-status').textContent = 'Cloudflare connected. Choose zones to manage sending domains.'; }
   else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); resetComposeReply(); resetComposeTags(); resetComposeTemplatePicker(); updateComposeMode(); $('#compose-status').textContent = ''; composeKey = null; composeDirty = false; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; clearMetricsReport(); resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; templateGeneration++; templateFilters = {}; $('#template-filter').reset(); $('#template-form').reset(); $('#template-form').hidden = true; $('#template-preview').hidden = true; $('#template-preview-content').replaceChildren(); templateId = null; templateDirty = false; }
-  if (!session) { inboxGeneration++; inboxFilters = {}; $('#inbox-filter').reset(); historyGeneration++; historyFilters = {}; $('#history-filter').reset(); }
+  if (!session) { cancelInboxDownloads(); inboxGeneration++; inboxFilters = {}; $('#inbox-filter').reset(); historyGeneration++; historyFilters = {}; $('#history-filter').reset(); }
 }
 let cloudflarePage = 1;
 async function loadCloudflareStatus() {
@@ -878,10 +879,35 @@ $('#copy-webhook-secret').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText($('#webhook-secret-value').textContent); $('#webhook-status').textContent = 'Signing secret copied.'; }
   catch { $('#webhook-status').textContent = 'Could not copy. Select and copy the secret manually.'; }
 });
+const inboxDownloads = new Set();
+function cancelInboxDownloads() { for (const controller of inboxDownloads) controller.abort(); inboxDownloads.clear(); }
+async function downloadInboxOriginal(id, button, message) {
+  const controller = new AbortController(); inboxDownloads.add(controller);
+  button.disabled = true; button.textContent = 'Downloading…'; message.textContent = 'Downloading original message…';
+  try {
+    // Refresh on every click: a message can stay open longer than its signed URL is valid.
+    const received = await api(`/api/inbox/${encodeURIComponent(id)}`, { signal: controller.signal });
+    if (!received.raw) { message.textContent = 'Original download is unavailable for this installation.'; return; }
+    const url = new URL(received.raw.download_url);
+    if (url.origin !== location.origin || url.username || url.password || url.hash || url.pathname !== `/downloads/receiving/${encodeURIComponent(id)}/raw`) throw new Error('Invalid download URL');
+    const response = await fetch(url, { signal: controller.signal, credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', cache: 'no-store' });
+    if (!response.ok || !response.headers.get('content-type')?.startsWith('application/octet-stream')) throw new Error('Download failed');
+    const blob = await response.blob();
+    if (controller.signal.aborted || !button.isConnected) return;
+    const objectUrl = URL.createObjectURL(blob); const link = document.createElement('a');
+    link.href = objectUrl; link.download = `${id}.eml`; link.hidden = true; document.body.append(link); link.click(); link.remove();
+    // Let the browser begin consuming the object URL before releasing its temporary backing data.
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    message.textContent = 'Download started. Check your browser downloads.';
+  } catch {
+    if (button.isConnected) message.textContent = controller.signal.aborted ? 'Download canceled.' : 'Could not download original message. Try again.';
+  } finally { inboxDownloads.delete(controller); button.disabled = false; button.textContent = 'Download .eml'; }
+}
 let inboxCursor = null;
 let inboxFilters = {};
 let inboxGeneration = 0;
 async function loadInbox(reset = false) {
+  if (reset) cancelInboxDownloads();
   const generation = reset ? ++inboxGeneration : inboxGeneration;
   const message = $('#inbox-status'); message.textContent = 'Loading received email…';
   const params = new URLSearchParams({ limit: '20' });
@@ -904,7 +930,11 @@ async function loadInbox(reset = false) {
         const reply = document.createElement('button'); reply.type = 'button'; reply.className = 'secondary'; reply.textContent = 'Reply';
         const replyStatus = document.createElement('p'); replyStatus.setAttribute('role', 'status');
         reply.addEventListener('click', () => { try { openReply(received); } catch (error) { replyStatus.textContent = error.message; } });
-        content.prepend(reply, replyStatus);
+        const download = document.createElement('button'); download.type = 'button'; download.className = 'secondary'; download.textContent = 'Download .eml';
+        download.addEventListener('click', () => downloadInboxOriginal(email.id, download, replyStatus));
+        const actions = document.createElement('div'); actions.className = 'inbox-actions'; actions.append(reply, download);
+        const note = document.createElement('p'); note.textContent = 'Original .eml includes all headers and attachments.';
+        content.prepend(actions, note, replyStatus);
         const body = document.createElement('pre'); body.className = 'inbox-body';
         body.textContent = received.text || received.html || '(No text content)'; content.append(body);
         if (!received.text && received.html) { const note = document.createElement('p'); note.textContent = 'HTML shown as source for safety.'; content.prepend(note); }
