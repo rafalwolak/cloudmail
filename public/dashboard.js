@@ -1,3 +1,5 @@
+import { metricLabels, dailyMetricRows, metricPlot } from '/dashboard-metrics.js';
+
 const $ = (selector) => document.querySelector(selector);
 const status = $('#status');
 const announce = (message) => { status.textContent = message; };
@@ -82,7 +84,7 @@ function setSignedIn(session) {
   $('#new-key').hidden = true;
   $('#key-value').textContent = '';
   if (session) { $('#account').textContent = session.user.email; if (cloudflareConnected) $('#cloudflare-status').textContent = 'Cloudflare connected. Choose zones to manage sending domains.'; }
-  else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); resetComposeTemplatePicker(); updateComposeMode(); $('#compose-status').textContent = ''; composeKey = null; composeDirty = false; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; templateGeneration++; templateFilters = {}; $('#template-filter').reset(); $('#template-form').reset(); $('#template-form').hidden = true; $('#template-preview').hidden = true; $('#template-preview-content').replaceChildren(); templateId = null; templateDirty = false; }
+  else { $('#cloudflare-selected-zones').replaceChildren(); $('#cloudflare-zone').replaceChildren(); $('#cloudflare-selected-zone').replaceChildren(); $('#cloudflare-domain-list').replaceChildren(); $('#cloudflare-suppression-list').replaceChildren(); $('#cloudflare-more-suppressions').hidden = true; suppressionCursor = null; $('#cloudflare-domain-controls').hidden = true; $('#cloudflare-disconnect').hidden = true; $('#cloudflare-domain-form').reset(); $('#cloudflare-suppression-form').reset(); $('#suppression-domain-wrap').hidden = true; $('#suppression-domain').required = false; $('#cloudflare-zone-form').hidden = true; $('#cloudflare-no-zones').hidden = false; $('#cloudflare-status').textContent = ''; $('#compose-form').reset(); resetComposeTemplatePicker(); updateComposeMode(); $('#compose-status').textContent = ''; composeKey = null; composeDirty = false; $('#metrics-results').replaceChildren(); $('#metrics-status').textContent = ''; clearMetricsReport(); resetWebhookForm(); $('#webhook-list').replaceChildren(); $('#webhook-secret-value').textContent = ''; $('#webhook-secret').hidden = true; $('#webhook-status').textContent = ''; $('#inbox-list').replaceChildren(); $('#inbox-more').hidden = true; $('#inbox-status').textContent = ''; inboxCursor = null; $('#history-list').replaceChildren(); $('#history-status').textContent = ''; $('#load-more').hidden = true; $('#template-list').replaceChildren(); $('#more-templates').hidden = true; templateCursor = null; templateGeneration++; templateFilters = {}; $('#template-filter').reset(); $('#template-form').reset(); $('#template-form').hidden = true; $('#template-preview').hidden = true; $('#template-preview-content').replaceChildren(); templateId = null; templateDirty = false; }
   if (!session) { inboxGeneration++; inboxFilters = {}; $('#inbox-filter').reset(); historyGeneration++; historyFilters = {}; $('#history-filter').reset(); }
 }
 let cloudflarePage = 1;
@@ -406,6 +408,44 @@ $('#compose-form').addEventListener('submit', async event => {
   } catch (error) { message.textContent = `${error.message} Check history before trying again; sending may be uncertain.`; }
   finally { fields.disabled = false; }
 });
+let metricsRows = null;
+function clearMetricsReport() {
+  metricsRows = null; $('#metrics-trend').hidden = true; $('#metrics-totals').hidden = true;
+  $('#metrics-trend-summary').textContent = ''; $('#metrics-scale-max').textContent = ''; $('#metrics-dates').replaceChildren();
+  $('#metrics-value-heading').textContent = 'Count'; $('#metrics-table-caption').textContent = ''; $('#metrics-chart').removeAttribute('aria-label');
+  $('#metrics-daily-rows').replaceChildren(); $('#metrics-line').removeAttribute('points');
+}
+function renderMetricsTrend() {
+  if (!metricsRows) return;
+  const key = $('#metrics-series').value;
+  const label = metricLabels[key];
+  const plot = metricPlot(metricsRows, key);
+  $('#metrics-scale-max').textContent = new Intl.NumberFormat().format(plot.max);
+  $('#metrics-line').setAttribute('points', plot.points);
+  $('#metrics-chart').setAttribute('aria-label', `${label} by UTC day`);
+  const peak = Math.max(0, ...metricsRows.map(row => row[key]));
+  $('#metrics-trend-summary').textContent = peak ? `Peak daily count: ${new Intl.NumberFormat().format(peak)}. Exact values are available below.` : `No ${label.toLowerCase()} recorded in this interval.`;
+  const dates = $('#metrics-dates'); dates.replaceChildren();
+  const formatter = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  for (const index of [...new Set([0, Math.floor((metricsRows.length - 1) / 2), metricsRows.length - 1])]) {
+    if (!metricsRows[index]) continue;
+    const time = document.createElement('time'); time.dateTime = metricsRows[index].period;
+    time.textContent = formatter.format(new Date(time.dateTime)); dates.append(time);
+  }
+  $('#metrics-value-heading').textContent = label;
+  $('#metrics-table-caption').textContent = `${label} per UTC day`;
+  const body = $('#metrics-daily-rows'); body.replaceChildren();
+  for (const row of metricsRows) {
+    const tr = document.createElement('tr'); const date = document.createElement('th'); date.scope = 'row'; date.textContent = row.period.slice(0, 10);
+    const count = document.createElement('td'); count.textContent = new Intl.NumberFormat().format(row[key]);
+    tr.append(date, count); body.append(tr);
+  }
+  $('#metrics-trend').hidden = false;
+}
+for (const [value, label] of Object.entries(metricLabels)) {
+  const option = document.createElement('option'); option.value = value; option.textContent = label; $('#metrics-series').append(option);
+}
+$('#metrics-series').addEventListener('change', renderMetricsTrend);
 let metricsGeneration = 0;
 $('#metrics-form').addEventListener('submit', async event => {
   event.preventDefault();
@@ -413,19 +453,20 @@ $('#metrics-form').addEventListener('submit', async event => {
   const button = event.currentTarget.querySelector('button');
   const output = $('#metrics-results');
   const message = $('#metrics-status');
-  button.disabled = true; output.replaceChildren(); message.textContent = 'Loading overview…';
+  button.disabled = true; output.replaceChildren(); clearMetricsReport(); message.textContent = 'Loading overview…';
   const end = new Date();
-  const start = new Date(end.getTime() - Number($('#metrics-range').value) * 86400000);
-  const params = new URLSearchParams({ start_date: start.toISOString(), end_date: end.toISOString() });
+  const start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()) - (Number($('#metrics-range').value) - 1) * 86400000);
+  const params = new URLSearchParams({ start_date: start.toISOString(), end_date: end.toISOString(), dimensions: 'period', granularity: 'daily' });
   try {
     const result = await api(`/api/history/metrics?${params}`);
     if (generation !== metricsGeneration) return;
-    const labels = { sent: 'Accepted messages', delivered: 'Delivered recipients', deferred: 'Deferred recipients', bounced: 'Bounced recipients', failed: 'Failed recipients', rejected: 'Rejected recipients', complained: 'Complaining recipients' };
-    for (const [key, label] of Object.entries(labels)) {
+    metricsRows = dailyMetricRows(result); renderMetricsTrend();
+    for (const [key, label] of Object.entries(metricLabels)) {
       const item = document.createElement('div'); const term = document.createElement('dt'); const value = document.createElement('dd');
       term.textContent = label; value.textContent = new Intl.NumberFormat().format(result.totals[key]); item.append(term, value); output.append(item);
     }
-    message.textContent = `From ${new Date(result.start_date).toLocaleString()} to ${new Date(result.end_date).toLocaleString()}.`;
+    $('#metrics-totals').hidden = false;
+    message.textContent = `UTC interval: ${new Date(result.start_date).toISOString().slice(0, 10)} to ${new Date(result.end_date).toISOString().replace('T', ' ').slice(0, 19)}.`;
   } catch (error) { if (generation === metricsGeneration) message.textContent = error.message; }
   finally { button.disabled = false; }
 });
