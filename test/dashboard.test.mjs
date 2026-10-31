@@ -14,6 +14,10 @@ test('dashboard exposes a labelled sign-in form and loads its script', async () 
   assert.equal(metricsModule.status, 200);
   assert.match(metricsModule.headers.get('content-type'), /javascript/);
   assert.match(await metricsModule.text(), /export function dailyMetricRows/);
+  const replyModule = await fetch(`${base}/dashboard-reply.js`);
+  assert.equal(replyModule.status, 200);
+  assert.match(replyModule.headers.get('content-type'), /javascript/);
+  assert.match(await replyModule.text(), /export function replyDraft/);
 });
 
 test('dashboard provides registration and password recovery forms', async () => {

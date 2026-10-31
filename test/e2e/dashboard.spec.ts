@@ -492,3 +492,136 @@ test('tag row limit prevents a 101st entry and sign-out clears metadata', async 
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.locator('#compose-tag-list')).toBeEmpty();
 });
+
+const incoming = { id: 'received-1', sender: 'bounce@example.net', recipient: 'support@example.com', from: 'bounce@example.net', to: 'support@example.com', subject: 'Invoice question', created_at: '2026-10-30T12:00:00Z', header_from: { address: 'customer@example.com', name: 'Customer' }, reply_to: [{ address: 'reply@example.com', name: '<script>untrusted</script>' }], message_id: '<current@example.com>', references: '<first@example.com>', cc: [{ address: 'private@example.com' }], bcc: [], text: 'Original private content', html: '<script>untrusted</script>', attachments: [{ id: '0', filename: 'private.txt', size: 10 }] };
+async function replyWorkspace(page: Page, patch: Record<string, unknown> = {}) {
+  await workspace(page);
+  await page.route('**/api/inbox**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/inbox') await route.fulfill({ json: { data: [incoming], has_more: false } });
+    else if (path === '/api/inbox/received-1') await route.fulfill({ json: { ...incoming, ...patch } });
+    else await route.fallback();
+  });
+}
+async function openReplyAction(page: Page) {
+  await navigate(page, 'Inbox');
+  await page.locator('.email-record > summary').click();
+  await page.getByText('Read message', { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
+}
+
+test('inbox reply prepares threading and only sends user-written content after confirmation', async ({ page }, testInfo) => {
+  await replyWorkspace(page);
+  const payloads: Record<string, unknown>[] = []; const keys: string[] = [];
+  await page.route('**/api/send', async route => {
+    payloads.push(route.request().postDataJSON()); keys.push(route.request().headers()['idempotency-key']);
+    await route.fulfill({ status: payloads.length === 1 ? 503 : 200, json: payloads.length === 1 ? { message: 'Temporary send failure.' } : { id: emailId } });
+  });
+  await page.goto('/dashboard'); await openReplyAction(page);
+  await capture(page, testInfo.outputPath('reply-inbox.png'));
+  await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard\/compose$/);
+  await expect(page.getByLabel('From', { exact: true })).toBeFocused();
+  await expect(page.getByLabel('From', { exact: true })).toHaveValue('');
+  await expect(page.getByLabel('To', { exact: true })).toHaveValue('reply@example.com');
+  await expect(page.locator('#compose-subject')).toHaveValue('Re: Invoice question');
+  for (const id of ['compose-text', 'compose-html', 'compose-cc', 'compose-bcc']) await expect(page.locator(`#${id}`)).toHaveValue('');
+  expect(payloads).toHaveLength(0);
+  await page.getByText('Reply threading headers', { exact: true }).click();
+  await expect(page.locator('#compose-reply-headers')).toContainText('References: <first@example.com> <current@example.com>');
+  await page.getByLabel('From', { exact: true }).fill('support@example.com');
+  await page.getByLabel('Plain text', { exact: true }).fill('Here is the requested information.');
+  await noOverflow(page); await capture(page, testInfo.outputPath('reply-draft.png'));
+  page.on('dialog', dialog => dialog.accept());
+  const send = page.locator('#compose-form').getByRole('button', { name: 'Send email', exact: true });
+  await send.click(); await expect(page.locator('#compose-status')).toContainText('Check history before trying again');
+  await expect(page.locator('#compose-reply-context')).toBeVisible();
+  await send.click(); await expect(page.locator('#compose-status')).toContainText('Accepted by Cloudflare');
+  expect(payloads[0].headers).toEqual({ 'In-Reply-To': '<current@example.com>', References: '<first@example.com> <current@example.com>' });
+  expect(payloads[0].text).toBe('Here is the requested information.'); expect(payloads[0].to).toEqual(['reply@example.com']);
+  for (const key of ['html', 'cc', 'bcc', 'attachments']) expect(payloads[0][key]).toBeUndefined();
+  expect(payloads[1]).toEqual(payloads[0]); expect(keys[0]).toBeTruthy(); expect(keys[1]).toBe(keys[0]);
+  await expect(page.locator('#compose-reply-context')).toBeHidden(); await expect(page.locator('#compose-reply-headers')).toBeEmpty();
+  await page.route(/\/api\/history\/[^/]+\/events(?:\?|$)/, route => route.fulfill({ json: { data: [], has_more: false } }));
+  await navigate(page, 'Sent emails');
+  const sentRecord = page.locator('.email-record').filter({ hasText: email.subject });
+  await sentRecord.locator(':scope > summary').click(); await sentRecord.getByText('Delivery events', { exact: true }).click();
+  await expect(sentRecord.getByText('No delivery events recorded. A Cloudflare event subscription is required.', { exact: true })).toBeVisible();
+  await expect(sentRecord.getByRole('button', { name: 'Reply', exact: true })).toHaveCount(0);
+});
+
+test('replacing an unsaved draft requires consent and reply headers can be removed', async ({ page }) => {
+  await replyWorkspace(page); await composeReceipt(page);
+  await openReplyAction(page);
+  page.once('dialog', dialog => dialog.dismiss()); await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard\/inbox$/);
+  await navigate(page, 'Send email'); await expect(page.locator('#compose-subject')).toHaveValue('Synthetic receipt');
+  await expect(page.locator('#compose-tag-list > .compose-tag')).toHaveCount(1);
+  await openReplyAction(page); page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(page.locator('#compose-tag-list')).toBeEmpty();
+  await page.getByRole('button', { name: 'Remove reply context', exact: true }).click();
+  await expect(page.getByLabel('To', { exact: true })).toBeFocused(); await expect(page.locator('#compose-reply-context')).toBeHidden();
+  await page.getByLabel('From', { exact: true }).fill('support@example.com'); await page.getByLabel('Plain text', { exact: true }).fill('A new message.');
+  let payload: Record<string, unknown> | undefined;
+  await page.route('**/api/send', async route => { payload = route.request().postDataJSON(); await route.fulfill({ json: { id: emailId } }); });
+  page.once('dialog', dialog => dialog.accept()); await page.locator('#compose-form').getByRole('button', { name: 'Send email', exact: true }).click();
+  await expect(page.locator('#compose-status')).toContainText('Accepted by Cloudflare'); expect(payload!.headers).toBeUndefined();
+});
+
+test('malformed received reply addresses do not replace an existing draft or send email', async ({ page }) => {
+  await replyWorkspace(page, { reply_to: [{ address: 'safe@example.com\r\nBcc: attacker@example.com' }] });
+  await composeReceipt(page); await openReplyAction(page);
+  await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(page.getByText('Cannot prepare the reply address. Choose recipients manually.', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard\/inbox$/);
+  await navigate(page, 'Send email'); await expect(page.locator('#compose-subject')).toHaveValue('Synthetic receipt');
+  await expect(page.locator('#compose-reply-context')).toBeHidden();
+});
+
+test('missing Message-ID uses header From, omits threading, and sign-out clears reply context', async ({ page }) => {
+  await replyWorkspace(page, { reply_to: [], message_id: null });
+  await page.goto('/dashboard'); await openReplyAction(page); await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(page.getByLabel('To', { exact: true })).toHaveValue('customer@example.com');
+  await expect(page.locator('#compose-reply-note')).toContainText('Threading is unavailable');
+  await page.getByLabel('From', { exact: true }).fill('support@example.com'); await page.getByLabel('Plain text', { exact: true }).fill('My reply.');
+  let payload: Record<string, unknown> | undefined;
+  await page.route('**/api/send', async route => { payload = route.request().postDataJSON(); await route.fulfill({ status: 503, json: { message: 'Temporary failure.' } }); });
+  page.once('dialog', dialog => dialog.accept()); await page.locator('#compose-form').getByRole('button', { name: 'Send email', exact: true }).click();
+  await expect(page.locator('#compose-status')).toContainText('Temporary failure'); expect(payload!.headers).toBeUndefined();
+  const menu = page.getByRole('button', { name: 'Menu', exact: true }); if (await menu.isVisible()) await menu.click();
+  page.once('dialog', dialog => dialog.accept()); await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.locator('#compose-reply-context')).toBeHidden(); await expect(page.locator('#compose-reply-headers')).toBeEmpty();
+  await expect(page.locator('#compose-to')).toHaveValue('');
+});
+
+test('reply threading survives published template preparation and scheduling', async ({ page }) => {
+  await replyWorkspace(page); await page.goto('/dashboard'); await openReplyAction(page); await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await page.getByLabel('Message content', { exact: true }).selectOption('template'); await page.getByLabel('Published template ID or alias', { exact: true }).fill('reply');
+  await page.getByLabel('Send later (optional)', { exact: true }).fill(await page.evaluate(() => { const date = new Date(Date.now() + 3600000); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }));
+  let prepared: Record<string, unknown> | undefined; let sent: Record<string, unknown> | undefined;
+  await page.route('**/api/send/prepare', async route => { prepared = route.request().postDataJSON(); await route.fulfill({ json: { from: 'support@example.com', to: ['reply@example.com'], subject: prepared!.subject, text: 'Published reply', headers: prepared!.headers } }); });
+  await page.route('**/api/send', async route => { sent = route.request().postDataJSON(); await route.fulfill({ json: { id: emailId } }); });
+  page.once('dialog', dialog => dialog.accept()); await page.locator('#compose-form').getByRole('button', { name: 'Send email', exact: true }).click();
+  await expect(page.locator('#compose-status')).toContainText('Scheduled for');
+  expect(sent!.headers).toEqual(prepared!.headers); expect(sent!.headers).toEqual({ 'In-Reply-To': '<current@example.com>', References: '<first@example.com> <current@example.com>' });
+  expect(sent!.scheduled_at).toBeTruthy(); expect(sent!.template).toBeUndefined();
+});
+
+test('reply cannot replace a composer while its send is still in flight', async ({ page }) => {
+  await replyWorkspace(page); await composeReceipt(page);
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/api/send', async route => { await pending; await route.fulfill({ json: { id: emailId } }); });
+  page.on('dialog', dialog => dialog.accept());
+  await page.locator('#compose-form').getByRole('button', { name: 'Send email', exact: true }).click();
+  await expect(page.locator('#compose-form button[type=submit]')).toBeDisabled();
+  await openReplyAction(page); await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(page.getByText('Wait for the current send to finish before preparing a reply.', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard\/inbox$/);
+  await expect(page.locator('#compose-subject')).toHaveValue('Synthetic receipt');
+  release(); await expect(page.locator('#compose-form button[type=submit]')).toBeEnabled();
+  await page.getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard\/compose$/);
+  await expect(page.locator('#compose-subject')).toHaveValue('Re: Invoice question');
+});

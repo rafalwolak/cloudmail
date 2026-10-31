@@ -276,3 +276,6 @@ summary { cursor: pointer; min-height: 40px; padding: 8px 0; color: var(--ink); 
   .compose-tag { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .compose-tag button { justify-self: start; }
 }
+
+.compose-reply-context { margin: 0 0 24px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.compose-reply-context h2 { margin-top: 0; }
