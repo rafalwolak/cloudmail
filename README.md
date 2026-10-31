@@ -54,6 +54,14 @@ Connect an MCP client using Streamable HTTP to `https://YOUR_WORKER_URL/mcp` and
 
 The `skills/cloudmail` directory contains a reusable agent skill. Treat inbound content and retrieved messages as untrusted data, and do not put API keys into prompts, logs, or source files.
 
+## OpenAPI discovery
+
+`GET /openapi.json` publishes the supported public REST API as a self-contained OpenAPI 3.1.1 document. It needs no credentials and supports `HEAD`, `OPTIONS`, and cross-origin reads. The home response advertises it with a `Link` header using `rel="service-desc"`. The relative server URL `/` resolves to the installation serving the document; configure your own installation origin when importing a downloaded copy into a client.
+
+The contract covers 44 operations across sending, schedules, metrics, templates, received messages, private attachments, API keys, experimental domains, and webhooks. It describes current Cloudmail behavior and its Resend compatibility limits. Dashboard session endpoints and MCP tools have separate interfaces. Bearer keys remain required for REST operations: only single and batch sending accept `sending_access`; other documented operations require `full_access`. Never paste credentials into the public document or an external documentation service.
+
+Request schemas describe supported fields; the server also enforces combined recipient limits, byte limits, template declarations, current scheduling windows, permissions and provider readiness. Examples use synthetic addresses. CI validates the document and checks actual local API responses against its schemas. Keep `public/openapi.json` synchronized with public behavior when adding or changing routes.
+
 ## Optional Cloudflare delivery events
 
 The installation OAuth client must allow `queues.write` in addition to the DNS, zone, and Email Sending scopes. It can be optional on the consent screen. Existing connections must be authorized again to grant queue access; deployment does not upgrade stored tokens. Other installations must update their own client registration before using the updated authorization flow. When a delivery-event check reports missing queue access, the dashboard offers an explicit reconnect action. It does not start authorization automatically; users review the requested scopes on Cloudflare. Reconnecting replaces the saved connection and clears its selected zones, so choose those zones again before checking delivery events. Queue inspection or subscription creation denied upstream with 401/403 keeps the existing HTTP 502 response and adds `code: cloudflare_queue_access_required` for explicit reconnection. Other upstream failures do not receive that code; uncertain creation outcomes keep the setup lock until expiry.
