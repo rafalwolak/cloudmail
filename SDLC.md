@@ -135,6 +135,7 @@ Every PR passes the full validation gate before review sign-off, in this order:
 
 - `npm run check`
 - `npm test`
+- `npm run test:e2e`
 
 Any non-zero exit fails the gate and blocks the PR. The implementing skills run the gate before opening a PR, and `om-check-and-commit` runs it before pushing a hand-worked branch. The command list lives in `.ai/agentic.config.json`; when it changes, update it there and in this section together.
 
@@ -149,11 +150,11 @@ Per-skill deviations — extra review rules, a different PR body template, an ad
 
 ## Cloudmail environment and current validation limits
 
-Cloudmail runs on Cloudflare Workers with D1, R2, Email Sending, Queue consumers, and scheduled handlers. Dashboard assets are served from `public/`. GitHub Actions runs `.github/workflows/ci.yml` for PRs to `main`: Node.js 26, `npm ci`, `npm run check`, then `npm test` against a disposable local Worker after all D1 migrations. D1-backed and cron scenarios share the same temporary persistence directory. Readiness is bounded to 60 seconds; failures print the Worker log and cleanup stops the Worker and removes generated local credentials. No Cloudflare token is required. There is no dedicated lint/build script. Do not substitute deployment for a validation command: `npm run deploy` applies remote migrations and deploys.
+Cloudmail runs on Cloudflare Workers with D1, R2, Email Sending, Queue consumers, and scheduled handlers. Dashboard assets are served from `public/`. GitHub Actions runs `.github/workflows/ci.yml` for PRs to `main`: Node.js 26, `npm ci`, `npm run check`, then `npm test` and `npm run test:e2e` against a disposable local Worker after all D1 migrations. D1-backed and cron scenarios share the same temporary persistence directory. Readiness is bounded to 60 seconds; failures print the Worker log and cleanup stops the Worker and removes generated local credentials. No Cloudflare token is required. There is no dedicated lint/build script. Do not substitute deployment for a validation command: `npm run deploy` applies remote migrations and deploys.
 
 Before the HTTP-dependent tests, prepare a disposable local environment as described in `README.md`: configure local authentication and a test API key, apply D1 migrations locally, then start `npm run dev`. Tests use `TEST_BASE_URL` (default `http://127.0.0.1:8787`) and `TEST_API_KEY`; confirm the target is the intended local Worker before running. Local sending is simulated by Wrangler. Never use production credentials or a production endpoint for tests. Keep test state isolated from normal development data. Registration coverage additionally requires `TEST_SIGNUP=true` and the matching local registration configuration.
 
-Playwright is the configured provider for browser QA. There is currently no committed Playwright E2E suite; browser skills provision the runner and shared configuration through `.ai/browsers/playwright.md` when first used. Selecting the provider does not add E2E tests to `npm test`.
+Playwright is the configured provider for browser QA. The committed dashboard E2E suite runs with `npm run test:e2e` using `playwright.config.ts`. Install Chromium once with `npx playwright install chromium` and keep the disposable local Worker running. The suite uses synthetic API responses for administrator UI states; it does not replace authentication integration tests. CI installs Chromium and runs it after `npm test`. The compatibility provider instructions remain in `.ai/browsers/playwright.md`.
 
 At setup on 2026-10-31, `npm run check` passed; `npm test` reported 92 passed, 57 failed, and 26 skipped. Failures included unexpected HTTP 404/405 responses from the default test target. Review later reproduced all 57 tests successfully against the intended local Worker (149 passed, 0 failed, 26 optional scenarios skipped); the setup-time result above is historical. No branch protection or CI enforcement was configured by setup; workflow labels alone do not enforce server-side merge protection.
 
