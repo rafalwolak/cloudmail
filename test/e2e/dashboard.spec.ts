@@ -5,7 +5,7 @@ const email = { id: emailId, subject: 'Receipt <script>untrusted</script>', from
 
 // Exercise real assets and routing with synthetic administrator responses.
 // Authorization itself is covered by the Worker integration tests.
-async function workspace(page: Page, options: { historyError?: boolean; anonymous?: boolean; existingWebhook?: boolean } = {}) {
+async function workspace(page: Page, options: { historyError?: boolean; anonymous?: boolean; existingWebhook?: boolean; deliveryEvents?: 'access-required' | 'post-access-required' | 'upstream-error' } = {}) {
   const requests: string[] = [];
   let webhook = { id: 'hook-1', endpoint: 'https://example.com/events', status: 'enabled', events: ['email.delivered'] };
   await page.route('**/api/**', async route => {
@@ -25,8 +25,14 @@ async function workspace(page: Page, options: { historyError?: boolean; anonymou
     else if (url.pathname === '/api/webhooks') body = { data: options.existingWebhook ? [webhook] : [], has_more: false };
     else if (url.pathname === '/api/webhooks/hook-1' && route.request().method() === 'PATCH') { webhook = { ...webhook, ...route.request().postDataJSON() }; body = { id: webhook.id }; }
     else if (url.pathname === '/api/inbox') body = { data: [], has_more: false };
-    else if (url.pathname === '/api/cloudflare/oauth/status') body = { connected: false, configured: true };
-    else if (url.pathname === '/api/cloudflare/zones') body = { data: [] };
+    else if (url.pathname === '/api/cloudflare/oauth/status') body = { connected: Boolean(options.deliveryEvents), configured: true };
+    else if (url.pathname === '/api/cloudflare/zones') body = { data: options.deliveryEvents ? [{ id: 'a'.repeat(32), name: 'example.com', account_id: 'b'.repeat(32) }] : [] };
+    else if (url.pathname === `/api/cloudflare/zones/${'a'.repeat(32)}/domains`) body = { data: [{ tag: 'c'.repeat(32), name: 'mail.example.com', enabled: true }] };
+    else if (url.pathname.endsWith('/delivery-events')) {
+      if (options.deliveryEvents === 'upstream-error') { status = 502; body = { message: 'Delivery events could not be checked. Try again.' }; }
+      else if (options.deliveryEvents === 'post-access-required' && route.request().method() === 'GET') body = { action: 'missing' };
+      else { status = 403; body = { code: 'cloudflare_queue_access_required', message: 'Cloudflare queue access is missing or expired.' }; }
+    } else if (url.pathname === '/api/cloudflare/oauth/start') body = { authorization_url: 'https://dash.cloudflare.com/oauth2/auth?client_id=local-fixture&scope=queues.write' };
     else { status = 500; body = { message: `Unexpected test request: ${url.pathname}` }; }
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   });
@@ -180,4 +186,103 @@ test('multiple recipients keep the attempt status separate from the latest recip
   await expect(summary).toContainText('alex@example.com, second@example.com');
   await expect(summary).toContainText('Accepted by Cloudflare');
   await expect(summary).toContainText('Latest recipient event: Delivered');
+});
+
+
+async function openDeliveryCheck(page: Page) {
+  await page.goto('/dashboard/domains');
+  await page.getByRole('button', { name: 'Load sending domains', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Load sending domains', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Check delivery events for mail.example.com', exact: true }).click();
+}
+
+test('delivery queue denial offers explicit reconnection without automatically starting OAuth', async ({ page }, testInfo) => {
+  const requests = await workspace(page, { deliveryEvents: 'access-required' });
+  await page.route('https://dash.cloudflare.com/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>Cloudflare authorization fixture</h1>' }));
+  await openDeliveryCheck(page);
+  const reconnect = page.getByRole('button', { name: 'Reconnect Cloudflare for mail.example.com', exact: true });
+  await expect(reconnect).toBeVisible();
+  await expect(page.getByText('After reconnecting, choose your zones again.', { exact: false })).toBeVisible();
+  expect(requests).not.toContain('/api/cloudflare/oauth/start');
+  await noOverflow(page);
+  await capture(page, testInfo.outputPath('queue-access.png'));
+  await reconnect.click();
+  await expect(page.getByRole('heading', { name: 'Cloudflare authorization fixture', exact: true })).toBeVisible();
+  expect(requests.filter(path => path === '/api/cloudflare/oauth/start')).toHaveLength(1);
+});
+
+test('unrelated delivery event failure does not suggest changing authorization', async ({ page }) => {
+  await workspace(page, { deliveryEvents: 'upstream-error' });
+  await openDeliveryCheck(page);
+  await expect(page.getByText('Delivery events could not be checked. Try again.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reconnect Cloudflare for mail.example.com', exact: true })).toBeHidden();
+});
+
+test('delivery subscription creation denial replaces the connect action with reconnection', async ({ page }) => {
+  await workspace(page, { deliveryEvents: 'post-access-required' });
+  await openDeliveryCheck(page);
+  const connect = page.getByRole('button', { name: 'Connect delivery events', exact: true });
+  await expect(connect).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  await connect.click();
+  await expect(page.getByRole('button', { name: 'Reconnect Cloudflare for mail.example.com', exact: true })).toBeVisible();
+  await expect(connect).toBeHidden();
+});
+
+test('a successful permission recheck clears the recovery action without claiming delivery', async ({ page }) => {
+  await workspace(page, { deliveryEvents: 'access-required' });
+  await openDeliveryCheck(page);
+  const reconnect = page.getByRole('button', { name: 'Reconnect Cloudflare for mail.example.com', exact: true });
+  await expect(reconnect).toBeVisible();
+  await page.route('**/delivery-events', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ action: 'ready', id: 'fixture' }) }));
+  await page.getByRole('button', { name: 'Check delivery events for mail.example.com', exact: true }).click();
+  await expect(reconnect).toBeHidden();
+  await expect(page.getByText('Delivery event subscription connected. Event arrival is not yet verified.', { exact: true })).toBeVisible();
+});
+
+
+test('a failed OAuth start leaves the recovery action retryable', async ({ page }) => {
+  await workspace(page, { deliveryEvents: 'access-required' });
+  let attempts = 0;
+  await page.route('**/api/cloudflare/oauth/start', async route => {
+    attempts++;
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Cloudflare authorization could not be started' }) });
+  });
+  await openDeliveryCheck(page);
+  const reconnect = page.getByRole('button', { name: 'Reconnect Cloudflare for mail.example.com', exact: true });
+  await expect(reconnect).toBeVisible();
+  await reconnect.click();
+  await expect(page.locator('#cloudflare-status')).toHaveText('Cloudflare authorization could not be started');
+  await expect(page.getByRole('button', { name: 'Connect Cloudflare', exact: true })).toBeEnabled();
+  await reconnect.click();
+  await expect.poll(() => attempts).toBe(2);
+});
+
+
+test('zone discovery can retry a failure and continue through multiple pages', async ({ page }) => {
+  await workspace(page, { deliveryEvents: 'access-required' });
+  let calls = 0;
+  await page.route('**/api/cloudflare/zones/available?*', async route => {
+    calls++;
+    if (calls === 1) {
+      await route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ message: 'Zone discovery unavailable. Retry.' }) });
+      return;
+    }
+    const number = Number(new URL(route.request().url()).searchParams.get('page'));
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data: [{ id: String(number).repeat(32), name: `zone${number}.example.com`, account: { name: 'Synthetic account' }, status: 'active' }], totalPages: 3 }) });
+  });
+  await page.goto('/dashboard/domains');
+  const choose = page.getByRole('button', { name: 'Choose zones', exact: true });
+  await choose.click();
+  await expect(page.locator('#cloudflare-status')).toHaveText('Zone discovery unavailable. Retry.');
+  await expect(choose).toBeEnabled();
+  await choose.click();
+  await expect(page.getByLabel('Available zones', { exact: true })).toBeVisible();
+  const more = page.getByRole('button', { name: 'Load more zones', exact: true });
+  await more.click();
+  await expect(page.locator('#cloudflare-zone option')).toHaveCount(2);
+  await expect(more).toBeEnabled();
+  await more.click();
+  await expect(page.locator('#cloudflare-zone option')).toHaveCount(3);
+  await expect(more).toBeHidden();
 });
