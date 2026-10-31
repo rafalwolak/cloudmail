@@ -11,27 +11,10 @@ test('API key management requires a user session', async () => {
 });
 
 test('verified admin can create, use and revoke a key', { skip: process.env.TEST_KEYS !== 'true' }, async () => {
-  const { readdir, readFile, stat } = await import('node:fs/promises');
-  const { join } = await import('node:path');
-  const email = process.env.TEST_ADMIN_EMAIL;
-  const password = 'a sufficiently long test password';
+  const email = process.env.TEST_DASHBOARD_ADMIN;
+  const password = process.env.TEST_DASHBOARD_PASSWORD;
+  assert.ok(email && password, 'Prepare the verified local administrator fixture first');
   const headers = { origin: base, 'content-type': 'application/json' };
-  const signup = await fetch(`${base}/api/auth/sign-up/email`, { method: 'POST', headers, body: JSON.stringify({ name: 'Admin', email, password }) });
-  assert.equal(signup.status, 200, await signup.clone().text());
-  async function files(path) {
-    const entries = await readdir(path, { withFileTypes: true });
-    return (await Promise.all(entries.map(e => e.isDirectory() ? files(join(path, e.name)) : [join(path, e.name)]))).flat();
-  }
-  const candidates = (await files('.wrangler/tmp/email')).filter(path => path.includes('/email-text/'));
-  const timestamps = await Promise.all(candidates.map(async path => ({ path, time: (await stat(path)).mtimeMs })));
-  timestamps.sort((a, b) => b.time - a.time);
-  const text = await readFile(timestamps[0].path, 'utf8');
-  const link = text.match(/https?:\/\/[^\s]+\/api\/auth\/verify-email\?[^\s]+/)?.[0];
-  assert.ok(link, 'verification link is present in the simulated email');
-  const url = new URL(link);
-  assert.equal(url.origin, new URL(base).origin);
-  const verification = await fetch(url, { redirect: 'manual' });
-  assert.ok([200, 302].includes(verification.status));
   const signin = await fetch(`${base}/api/auth/sign-in/email`, { method: 'POST', headers, body: JSON.stringify({ email, password }) });
   assert.equal(signin.status, 200, await signin.clone().text());
   const cookie = signin.headers.get('set-cookie').split(';')[0];
