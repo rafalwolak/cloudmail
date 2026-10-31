@@ -12,6 +12,31 @@ async function database() {
   return { sqlite, prepare(sql) { return { bind(...args) { return { async run() { const r = sqlite.prepare(sql).run(...args); return { meta: { changes: Number(r.changes) } }; }, async first() { return sqlite.prepare(sql).get(...args) ?? null; } }; } }; } };
 }
 
+test('delivery event inspection uses the selected account and verified domain metadata', async () => {
+  const db = await database(), secret = 's'.repeat(40), original = globalThis.fetch;
+  const zone = 'a'.repeat(32), account = 'b'.repeat(32), domainId = 'c'.repeat(32), queue = 'd'.repeat(32);
+  const env = { DB: db, BETTER_AUTH_SECRET: secret, CLOUDFLARE_OAUTH_CLIENT_ID: 'client', DELIVERY_QUEUE_NAME: 'delivery' };
+  const request = () => new Request(`https://example.com/api/cloudflare/zones/${zone}/domains/${domainId}/delivery-events`);
+  let calls = 0;
+  globalThis.fetch = async (input, options) => {
+    calls++; const url = new URL(input);
+    if (options.method === 'POST') return Response.json({ success: true, result: { id: 'subscription', ...JSON.parse(options.body) } });
+    if (url.pathname.includes('/subdomains/')) return Response.json({ success: true, result: { name: 'mail.example.com', enabled: true } });
+    assert.ok(url.pathname.startsWith(`/client/v4/accounts/${account}/`));
+    const result = url.pathname.endsWith('/queues') ? [{ queue_name: 'delivery', queue_id: queue }] : [];
+    return Response.json({ success: true, result, result_info: { page: 1, total_pages: 1, total_count: result.length } });
+  };
+  try {
+    await saveCloudflareOAuthTokens(db, secret, 'admin', { accessToken: 'access', refreshToken: 'refresh', expiresAt: Date.now() + 3600000 });
+    db.sqlite.prepare('INSERT INTO cloudflare_zones VALUES (?, ?, ?, ?)').run('admin', zone, 'example.com', account);
+    assert.equal((await manageSelectedZoneDomains(request(), env, 'other')).status, 404); assert.equal(calls, 0);
+    const result = await manageSelectedZoneDomains(request(), env, 'admin'); assert.equal(result.status, 200); assert.deepEqual(await result.json(), { action: 'missing' });
+    db.sqlite.exec(await readFile(new URL('../migrations/0038_delivery_subscription_locks.sql', import.meta.url), 'utf8'));
+    const created = await manageSelectedZoneDomains(new Request(request(), { method: 'POST' }), env, 'admin');
+    assert.equal(created.status, 200); assert.deepEqual(await created.json(), { action: 'created', id: 'subscription' });
+  } finally { globalThis.fetch = original; db.sqlite.close(); }
+});
+
 test('domain operations require an administrator-selected zone and use its OAuth credentials', async () => {
   const db = await database(), secret = 's'.repeat(40), original = globalThis.fetch, zone = 'a'.repeat(32);
   const env = { DB: db, BETTER_AUTH_SECRET: secret, CLOUDFLARE_OAUTH_CLIENT_ID: 'client' };

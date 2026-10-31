@@ -117,6 +117,24 @@ async function loadCloudflareDomains() {
   for (const domain of result.data) {
     const item = document.createElement('li'); const label = document.createElement('span');
     label.textContent = `${domain.name} · ${domain.enabled ? 'Enabled' : 'Not enabled'} (DNS and delivery not verified)`; item.append(label);
+    if (domain.enabled) {
+      const checkEvents = document.createElement('button'); checkEvents.type = 'button'; checkEvents.className = 'text-button'; checkEvents.textContent = 'Check delivery events'; checkEvents.setAttribute('aria-label', `Check delivery events for ${domain.name}`);
+      const connectEvents = document.createElement('button'); connectEvents.type = 'button'; connectEvents.className = 'text-button'; connectEvents.textContent = 'Connect delivery events'; connectEvents.hidden = true;
+      const eventStatus = document.createElement('p'); eventStatus.setAttribute('role', 'status');
+      const check = async method => {
+        checkEvents.disabled = true; connectEvents.disabled = true;
+        try {
+          const report = await api(`/api/cloudflare/zones/${encodeURIComponent(zone)}/domains/${encodeURIComponent(domain.tag)}/delivery-events`, { method });
+          if (generation !== cloudflareGeneration) return;
+          connectEvents.hidden = report.action !== 'missing';
+          eventStatus.textContent = ['ready', 'created'].includes(report.action) ? 'Delivery event subscription connected. Event arrival is not yet verified.' : report.action === 'missing' ? 'No delivery event subscription found for this domain and queue.' : 'Existing subscriptions need review in Cloudflare before connecting.';
+        } catch (error) { if (generation === cloudflareGeneration) eventStatus.textContent = error.message; }
+        finally { checkEvents.disabled = false; connectEvents.disabled = false; }
+      };
+      checkEvents.addEventListener('click', () => check('GET'));
+      connectEvents.addEventListener('click', () => { if (window.confirm(`Connect delivery events for ${domain.name} to this installation's queue?`)) void check('POST'); });
+      item.append(checkEvents, connectEvents, eventStatus);
+    }
     const details = document.createElement('details'); const summary = document.createElement('summary'); summary.textContent = 'Expected DNS records';
     const content = document.createElement('div'); content.textContent = 'Open to load expected records. Their presence and delivery are not verified.'; details.append(summary, content);
     let loadingDns = false;
