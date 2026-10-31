@@ -28,6 +28,8 @@ Verified administrators can send or schedule transactional email from the dashbo
 
 For local testing, configure `.dev.vars` with `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL=http://127.0.0.1:8787`, and `API_KEY=local-test-key`, apply migrations with `npx wrangler d1 migrations apply cloudmail-auth --local`, start `npm run dev`, and run `npm test` in another terminal. To test registration, add `ENABLE_SIGNUP=true` and `AUTH_EMAIL_FROM` to `.dev.vars`, restart the local server, then run `TEST_SIGNUP=true npm test`. Local email sending is simulated by Wrangler.
 
+GitHub Actions runs `npm run check` and `npm test` for pull requests targeting `main` through `.github/workflows/ci.yml`. CI uses Node.js 26 and a disposable local Worker with all D1 migrations applied, generated local credentials, and simulated email sending. D1-backed and cron tests are enabled against the same local state; registration, administrator, and password-reset scenarios still require their optional fixtures. No Cloudflare account token or production secrets are needed. The workflow does not configure branch protection.
+
 Never use the API for marketing email: Cloudflare Email Service supports transactional email only.
 
 ## Roadmap

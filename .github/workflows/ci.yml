@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Typecheck and tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+      TEST_BASE_URL: http://127.0.0.1:8787
+      TEST_D1_CONFIG: wrangler.jsonc
+      TEST_CRON: 'true'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '26'
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - name: Test against a local Worker
+        shell: bash
+        run: |
+          worker_pid=
+          worker_log="$RUNNER_TEMP/cloudmail-worker.log"
+          # shellcheck disable=SC2329 # Invoked by the EXIT trap.
+          cleanup() {
+            result=$?
+            trap - EXIT
+            if [ -n "$worker_pid" ]; then
+              kill "$worker_pid" 2>/dev/null || true
+              wait "$worker_pid" 2>/dev/null || true
+            fi
+            rm -f .dev.vars
+            if [ "$result" -ne 0 ] && [ -f "$worker_log" ]; then
+              cat "$worker_log"
+            fi
+            exit "$result"
+          }
+          trap 'cleanup' EXIT
+
+          TEST_API_KEY=$(openssl rand -hex 32)
+          TEST_D1_PERSIST="$RUNNER_TEMP/cloudmail-state"
+          export TEST_API_KEY TEST_D1_PERSIST
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs';
+          import { randomBytes } from 'node:crypto';
+          writeFileSync('.dev.vars', [
+            `BETTER_AUTH_SECRET=${randomBytes(48).toString('hex')}`,
+            `BETTER_AUTH_URL=${process.env.TEST_BASE_URL}`,
+            `API_KEY=${process.env.TEST_API_KEY}`,
+            'ENABLE_SIGNUP=false',
+            '',
+          ].join('\n'), { mode: 0o600 });
+          JS
+
+          node_modules/.bin/wrangler d1 migrations apply DB --local --persist-to "$TEST_D1_PERSIST"
+          node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port 8787 --persist-to "$TEST_D1_PERSIST" --log-level warn > "$worker_log" 2>&1 &
+          worker_pid=$!
+          export worker_pid
+          if timeout 60s bash -e -o pipefail <<'SH'
+          while true; do
+            if curl --fail --silent --connect-timeout 1 --max-time 2 "$TEST_BASE_URL/api/setup" -o "$RUNNER_TEMP/cloudmail-health.json"; then
+              node -e 'const fs = require("node:fs"); const health = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/cloudmail-health.json", "utf8")); if (!health.authentication_configured || !health.authentication_origin_matches) process.exit(1);'
+              exit 0
+            fi
+            if ! kill -0 "$worker_pid" 2>/dev/null; then
+              echo "Local Worker exited before becoming ready" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          SH
+          then
+            npm test
+          else
+            result=$?
+            if [ "$result" -eq 124 ]; then
+              echo "Local Worker did not become ready within 60 seconds" >&2
+            fi
+            exit "$result"
+          fi
