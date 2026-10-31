@@ -70,10 +70,11 @@ jobs:
           node_modules/.bin/wrangler d1 migrations apply DB --local --persist-to "$TEST_D1_PERSIST"
           node_modules/.bin/wrangler dev --local --ip 127.0.0.1 --port 8787 --persist-to "$TEST_D1_PERSIST" --log-level warn > "$worker_log" 2>&1 &
           worker_pid=$!
-          for _ in {1..60}; do
-            if curl --fail --silent "$TEST_BASE_URL/api/setup" -o "$RUNNER_TEMP/cloudmail-health.json"; then
+          export worker_pid
+          if timeout 60s bash -e -o pipefail <<'SH'
+          while true; do
+            if curl --fail --silent --connect-timeout 1 --max-time 2 "$TEST_BASE_URL/api/setup" -o "$RUNNER_TEMP/cloudmail-health.json"; then
               node -e 'const fs = require("node:fs"); const health = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/cloudmail-health.json", "utf8")); if (!health.authentication_configured || !health.authentication_origin_matches) process.exit(1);'
-              npm test
               exit 0
             fi
             if ! kill -0 "$worker_pid" 2>/dev/null; then
@@ -82,5 +83,13 @@ jobs:
             fi
             sleep 1
           done
-          echo "Local Worker did not become ready within 60 seconds" >&2
-          exit 1
+          SH
+          then
+            npm test
+          else
+            result=$?
+            if [ "$result" -eq 124 ]; then
+              echo "Local Worker did not become ready within 60 seconds" >&2
+            fi
+            exit "$result"
+          fi
