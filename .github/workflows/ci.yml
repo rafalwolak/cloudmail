@@ -31,6 +31,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - name: Install browser test runtime
+        run: npx playwright install --with-deps chromium
       - name: Test against a local Worker
         shell: bash
         run: |
@@ -86,6 +88,7 @@ jobs:
           SH
           then
             npm test
+            npm run test:e2e
           else
             result=$?
             if [ "$result" -eq 124 ]; then
