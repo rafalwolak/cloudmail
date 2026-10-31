@@ -3,3 +3,7 @@ node_modules/
 .dev.vars
 
 .wrangler.live.json
+
+.ai/qa/artifacts_*/
+.ai/qa/test-env.json
+.ai/qa/test-env.env
