@@ -28,7 +28,7 @@ export async function manageSelectedZoneDomains(request: Request, env: { DB: D1D
       const result = await inspectDeliverySubscription(accessToken, zone.account_id, env.DELIVERY_QUEUE_NAME!, zoneId, domain.name);
       return json(result.action === 'create' ? { action: 'missing' } : result);
     } catch (error) {
-      if (error instanceof CloudflareQueueAccessError) return json({ code: 'cloudflare_queue_access_required', message: 'Cloudflare queue access is missing or expired. Enable queue access for this installation’s OAuth client, then reconnect Cloudflare.' }, 403);
+      if (error instanceof CloudflareQueueAccessError) return json({ code: 'cloudflare_queue_access_required', message: 'Cloudflare queue access is missing or expired. Enable queue access for this installation’s OAuth client, then reconnect Cloudflare.' }, 502);
       return json({ message: 'Delivery event configuration could not be confirmed. Check Cloudflare queue permissions and existing subscriptions before retrying.' }, 502);
     }
   }
